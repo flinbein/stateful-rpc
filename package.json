@@ -32,19 +32,19 @@
   "files": ["dist"],
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.cjs"
     },
     "./channel": {
+      "types": "./dist/RPCChannel.d.ts",
       "import": "./dist/RPCChannel.js",
-      "require": "./dist/RPCChannel.cjs",
-      "types": "./dist/RPCChannel.d.ts"
+      "require": "./dist/RPCChannel.cjs"
     },
     "./source": {
+      "types": "./dist/RPCSource.d.ts",
       "import": "./dist/RPCSource.js",
-      "require": "./dist/RPCSource.cjs",
-      "types": "./dist/RPCSource.d.ts"
+      "require": "./dist/RPCSource.cjs"
     },
     "./package.json": "./package.json"
   }
