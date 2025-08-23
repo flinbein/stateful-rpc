@@ -28,6 +28,8 @@ jobs:
 
       - name: Bump version and push tag
         run: |
+          git config --global user.email "dpohvar@gmail.com"
+          git config --global user.name "GITHUB_ACTIONS"
           npm version $VERSION_TYPE -m "Bump version to %s [skip ci]"
           git push origin main --tags
         env:
