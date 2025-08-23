@@ -28,10 +28,11 @@ jobs:
 
       - name: Bump version and push tag
         run: |
-          npm version {{ inputs.VERSION_TYPE }} -m "Bump version to %s [skip ci]"
+          npm version $VERSION_TYPE -m "Bump version to %s [skip ci]"
           git push origin main --tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_TYPE: ${{ inputs.VERSION_TYPE }}
 
       - name: Install (npm)
         run: npm clean-install
