@@ -1,0 +1,48 @@
+name: npm-publish
+
+on:
+  push:
+    branches: main
+  workflow_dispatch:
+    inputs:
+      VERSION_TYPE:
+        description: 'Version type to bump (patch, minor, major)'
+        required: true
+        default: 'patch'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Bump version and push tag
+        run: |
+          npm version {{ VERSION_TYPE }} -m "Bump version to %s [skip ci]"
+          git push origin main --tags
+        env:
+          VERSION_TYPE: ${{ steps.check_commit_message.outputs.VERSION_TYPE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install (npm)
+        run: npm clean-install
+
+      - name: Build (npm)
+        run: npm run build
+
+      - name: Publish (npm)
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_FLINBEIN }}
+
+
