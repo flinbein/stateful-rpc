@@ -1,6 +1,6 @@
 {
   "name": "@flinbein/stateful-rpc",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "",
   "keywords": [
     "RPC"
@@ -29,7 +29,11 @@
     "unplugin-dts": "^1.0.0-beta.0",
     "vite": "^7.1.3"
   },
-  "files": ["dist", "contract.md", "network-examples.md"],
+  "files": [
+    "dist",
+    "contract.md",
+    "network-examples.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
