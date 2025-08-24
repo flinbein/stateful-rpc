@@ -30,7 +30,9 @@ export class WebSocketMock extends (EventTarget as any as typeof WebSocket) impl
 	
 	constructor(open?: boolean) {
 		super("");
-		this.#resolver.promise.catch(() => {});
+		this.addEventListener("error", () => {});
+		this.promise.catch(() => {});
+		this.closePromise.catch(() => {});
 		this.backend = new WebSocketBackendMock(this, open ?? false);
 		if (open) {
 			this.readyState = WebSocketMock.OPEN;
@@ -93,6 +95,7 @@ class WebSocketBackendMock extends (EventTarget as any as typeof WebSocket) impl
 	
 	constructor(private client: WebSocketMock, open: boolean) {
 		super("");
+		this.addEventListener("error", () => {});
 		if (open) this.readyState = WebSocketMock.OPEN;
 		this.addEventListener("close", (event) => {
 			if (this.readyState === WebSocketMock.CONNECTING) {

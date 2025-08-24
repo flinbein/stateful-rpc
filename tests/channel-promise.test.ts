@@ -1,26 +1,16 @@
 import * as assert from "node:assert";
 import { describe, it } from "node:test";
-import { WebSocketMock } from "../WebsocketMocks.js"
-import wsWrapper from "./wsWrapper.js"
-import RPCChannel from "../../src/RPCChannel.js"
-import RPCSource from "../../src/RPCSource.js"
+import { createChannelFactory } from "./createChannelFactory.js";
+import RPCSource from "../src/RPCSource.js"
 
 describe("channel-promise", () => {
 	
-	const getNextChannelId = ((id = 0) => () => id++)();
-	
-	function createRpcWebsocket<T extends RPCSource<any, any>>(rpcSource: T) {
-		const ws = new WebSocketMock();
-		RPCSource.start(rpcSource, wsWrapper(ws.backend));
-		ws.backend.open();
-		return ws;
-	}
-	
 	it("should close the channel by backend with reason", async () => {
 		const rpcSource = new RPCSource({});
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel(wsWrapper(ws), {getNextChannelId});
-		ws.backend.close(4000, "test-close-reason");
+		const abortController = new AbortController();
+		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const channel = createChannel();
+		abortController.abort("test-close-reason");
 		await assert.rejects(
 			channel.promise,
 			(msg) => msg === "test-close-reason",
@@ -30,23 +20,11 @@ describe("channel-promise", () => {
 		assert.equal(channel.ready, false, "channel should not be ready");
 	});
 	
-	it("should close the channel with reason", async () => {
-		const rpcSource = new RPCSource({});
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel(wsWrapper(ws), {getNextChannelId});
-		ws.close(4000, "test-close-reason");
-		await assert.rejects(
-			channel.promise,
-			(msg) => msg === "test-close-reason",
-			"should reject with close reason"
-		);
-	});
-	
 	it("should close the channel by dispose", async () => {
 		const rpcSource = new RPCSource({});
 		rpcSource.dispose("test-dispose-reason");
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel(wsWrapper(ws), {getNextChannelId});
+		const createChannel = createChannelFactory(rpcSource);
+		const channel = createChannel();
 		await assert.rejects(
 			channel.promise,
 			(msg) => msg === "test-dispose-reason",
@@ -58,8 +36,8 @@ describe("channel-promise", () => {
 	
 	it("should open channel", async () => {
 		const rpcSource = new RPCSource({});
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel(wsWrapper(ws), {getNextChannelId});
+		const createChannel = createChannelFactory(rpcSource);
+		const channel = createChannel();
 		assert.equal(await channel.promise, channel, "promise should resolve to channel");
 		assert.equal(channel.closed, false, "channel should not be closed");
 		assert.equal(channel.ready, true, "channel should be ready");
@@ -68,11 +46,12 @@ describe("channel-promise", () => {
 	it("inner channel should be rejected on ws close", async () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel<typeof rpcSource>(wsWrapper(ws), {getNextChannelId});
+		const abortController = new AbortController();
+		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const channel = createChannel();
 		const innerChannel1 = new channel.getInner();
 		const innerChannel2 = new channel.getInner();
-		ws.backend.close(4000, "test-close-reason");
+		abortController.abort("test-close-reason");
 		await assert.rejects(
 			innerChannel1.promise,
 			(msg) => msg === "test-close-reason",
@@ -92,8 +71,8 @@ describe("channel-promise", () => {
 	it("inner channel should be resolved", async () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel<typeof rpcSource>(wsWrapper(ws), {getNextChannelId});
+		const createChannel = createChannelFactory(rpcSource);
+		const channel = createChannel();
 		const innerChannel1 = new channel.getInner();
 		const innerChannel2 = new channel.getInner();
 		assert.equal(await innerChannel1.promise, innerChannel1, "promise 1 should resolve to channel");
@@ -108,8 +87,8 @@ describe("channel-promise", () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		rpcSourceInner.dispose("test-dispose-reason");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
-		using ws = createRpcWebsocket(rpcSource);
-		const channel = new RPCChannel<typeof rpcSource>(wsWrapper(ws), {getNextChannelId});
+		const createChannel = createChannelFactory(rpcSource);
+		const channel = createChannel();
 		const innerChannel1 = new channel.getInner();
 		const innerChannel2 = new channel.getInner();
 		await assert.rejects(

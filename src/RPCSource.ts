@@ -14,6 +14,7 @@ export type RPCSourceMessageMapper = (send: (...messages: any[]) => void, close:
  * In this case the handler must return a {@link RPCSource} or {@link Promise}<{@link RPCSource}>.
  */
 export type RPCHandler = (
+	context: boolean,
 	path: string[],
 	args: any[],
 	openChannel: boolean,
@@ -272,8 +273,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 				if (prop.startsWith(prefix)) throw new Error("prefix "+prefix+" is danger");
 			}
 		}
-		return function(path: string[], args: any[], openChannel: boolean) {
-			let base: any = undefined;
+		return function(context: any, path: string[], args: any[], openChannel: boolean) {
 			let target: any = parameters?.form;
 			for (let i=0; i<path.length; i++) {
 				const step = i === 0 ? prefix + path[i] : path[i];
@@ -284,7 +284,6 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 						throw new Error("wrong path: "+step+" in ("+prefix+")"+path.join(".")+": forbidden prop");
 					}
 				}
-				base = target;
 				target = target[step];
 			}
 			if (openChannel && args.length === 0) {
@@ -296,12 +295,13 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 					return Reflect.construct(target, args, MetaConstructor);
 				}
 				MetaConstructor.prototype = target.prototype;
+				MetaConstructor.context = context;
 				MetaConstructor.autoClose = true;
 				const result: RPCSource = MetaConstructor(...args);
 				result.#autoDispose = MetaConstructor.autoClose
 				return result;
 			}
-			return target.apply(base, args);
+			return target.apply(context, args);
 		}
 	}
 	
@@ -423,10 +423,15 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 	/**
 	 * start listening for messages and processing procedure calls
 	 * @param rpcSource message handler
-	 * @param handler client
+	 * @param handler client handler
 	 * @param maxChannelsPerClient set a limit on the number of opened channels
+	 * @param context context
 	 */
-	static start(rpcSource: RPCSource<any, any, any>, handler: RPCSourceMessageMapper, {maxChannelsPerClient = Infinity} = {}){
+	static start(
+		rpcSource: RPCSource<any, any, any>,
+		handler: RPCSourceMessageMapper,
+		{maxChannelsPerClient = Infinity, context}: {maxChannelsPerClient?: number, context?: any} = {}
+	){
 		const channels = new Map<string|number, RPCSourceChannel>
 		const subscribers = new Map<RPCSource<any, any, any>, (string|number)[]>
 		const sendMessage = handler(onConnectionMessage, close)
@@ -437,7 +442,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 		
 		function onMessageNotify(source: RPCSource, path: (string|number)[], args: any[]) {
 			try {
-				source.#handler(path as any[], args as any[], false);
+				source.#handler(context, path as any[], args as any[], false);
 			} catch {}
 		}
 		
@@ -452,7 +457,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 		async function onMessageCallMethod(source: RPCSource, channelId: string, callId: any, path: string[], callArgs: any[]) {
 			try {
 				try {
-					const result = await source.#handler(path, callArgs, false);
+					const result = await source.#handler(context, path, callArgs, false);
 					if (result instanceof RPCSource) throw new Error("wrong data type");
 					sendMessage([channelId], REMOTE_ACTION.RESPONSE_OK, callId, result);
 				} catch (error) {
@@ -473,7 +478,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 			try {
 				try {
 					if (channels.size >= maxChannelsPerClient) throw new Error("channels limit");
-					const result = await source.#handler(path, callArgs, true);
+					const result = await source.#handler(context, path, callArgs, true);
 					if (!(result instanceof RPCSource)) throw new Error("wrong data type");
 					RPCSource.#createChannel(result, newChannelId, sendMessage, channels, subscribers);
 				} catch (error) {

@@ -15,6 +15,8 @@ npm install @flinbein/stateful-rpc
 - Event-based messaging system
 - Nested channels support
 - Promise-based API
+- Based on Proxy for dynamic method handling
+- Works with WebSockets, MessagePorts, and more
 
 ## Basic Usage
 
@@ -23,9 +25,6 @@ npm install @flinbein/stateful-rpc
 ```typescript
 import { RPCSource } from '@flinbein/stateful-rpc';
 import ws from 'ws';
-
-// Create a WebSocket server
-const wss = new ws.Server({ port: 8080 });
 
 // Create an RPC source with methods and initial state
 export const calculator = new RPCSource({
@@ -37,6 +36,9 @@ export const calculator = new RPCSource({
     return a / b;
   }
 }, "calculator");
+
+// Create a WebSocket server
+const wss = new ws.Server({ port: 8080 });
 
 // Handle WebSocket connections
 wss.on('connection', (socket) => {
@@ -204,8 +206,194 @@ userChannel.on('state', (newState) => {
 });
 ```
 
+## Custom Events
+
+RPCSource provides a powerful event system that allows the server to emit events to connected clients.
+
+### Server Side
+
+```typescript
+import { RPCSource } from '@flinbein/stateful-rpc';
+
+// Define the event types using TypeScript
+export const notificationService = new RPCSource({}).withEventTypes<{
+  alive: [aliveSignal: boolean],
+  alert: {
+    warning: [message: string, level: number],
+    error: [code: string, message: string]
+  }
+}>();
+
+// Later, emit events to all connected clients
+notificationService.emit("alive", true);
+notificationService.emit(["alert", "warning"], "System maintenance soon", 2);
+notificationService.emit(["alert", "error"], "ERR_001", "Connection lost");
+```
+
+### Client Side
+
+```typescript
+const channel = new RPCChannel<typeof notificationService>(wsWrapper(socket));
+
+// Listen for custom events
+channel.on("alive", (aliveSignal) => {
+  console.log(`notificationService is alive: ${aliveSignal}`);
+});
+
+// Listen for nested events using dot notation
+channel.alert.on("warning", (message, level) => {
+  console.log(`Warning (level ${level}): ${message}`);
+});
+
+// Or use array path for nested events
+channel.on(["alert", "error"], (code, message) => {
+  console.log(`Error ${code}: ${message}`);
+});
+```
+Reserved event names: `state`, `close`, `error`, `ready`.\
+But you can use them as an array path:
+```typescript
+channel.on(['state'], (event) => {
+  // this is a custom event named "state", not the built-in state event.
+  console.log(event);
+});
+```
+
+## Class-Based RPCSource
+
+You can use class-based approach with method prefixes:
+
+```typescript
+// Using static helper method
+class Calculator extends RPCSource.with("$") {
+  // Prefix is automatically recognized
+  $multiply(this: undefined, a: number, b: number) {
+    return a * b;
+  }
+  
+  $divide(this: undefined, a: number, b: number) {
+    if (b === 0) throw new Error("Division by zero");
+    return a / b;
+  }
+}
+
+const rpcCalculator = new Calculator();
+RPCSource.start(rpcCalculator, wsWrapper(socket))
+
+// Client-side
+const calculator = new RPCChannel<Calculator>(wsWrapper(socket));
+const result = await calculator.multiply(5, 3); // Calls $multiply on the server
+```
+
+## Using with MessagePort
+
+The library works seamlessly with Web Workers and MessagePorts:
+
+```typescript
+// Server side (Web Worker)
+import { RPCSource } from '@flinbein/stateful-rpc';
+
+const calculator = new RPCSource({
+  add: (a, b) => a + b,
+  subtract: (a, b) => a - b
+});
+
+self.onmessage = (event) => {
+  const port = event.data;
+  RPCSource.start(calculator, (send, close) => {
+    port.onmessage = (messageEvent) => {
+      send(...messageEvent.data);
+    };
+    port.start();
+    return (...args) => {
+      port.postMessage(args);
+    };
+  });
+};
+```
+
+```typescript
+// Client side
+import { RPCChannel } from '@flinbein/stateful-rpc';
+
+const worker = new Worker('calculator-worker.js');
+const messageChannel = new MessageChannel();
+
+worker.postMessage(messageChannel.port1, [messageChannel.port1]);
+
+const channel = new RPCChannel((send) => {
+  messageChannel.port2.onmessage = (event) => {
+    send(...event.data);
+  };
+  messageChannel.port2.start();
+  return (...args) => {
+    messageChannel.port2.postMessage(args);
+  };
+});
+
+const result = await channel.add(5, 3);
+console.log(result); // 8
+```
+
+## Context in RPC Methods
+
+You can provide a context object when starting the RPC service:
+
+```typescript
+// Server side
+const users = new Map();
+
+const userService = new RPCSource({
+  // 'this' will be the context object (socket)
+  setName: function(this: WebSocket, name: string) {
+    users.set(this, name);
+    return true;
+  },
+  getName: function(this: WebSocket) {
+    return users.get(this);
+  }
+});
+
+// Provide the socket as context
+wss.on('connection', (socket) => {
+  RPCSource.start(userService, wsWrapper(socket), {context: socket});
+});
+```
+
 ## Channel Lifecycle
 
+```mermaid
+flowchart TD
+  pending -- on('ready'), on('state') --> ready
+  ready -- on('close') --> closed
+  pending -- on('error'), on('close') --> closed
+```
+
+### Pending
+The channel is being established.
+- `channel.ready` is `false`.
+- `channel.closed` is `false`.
+- `channel.promise` is pending.
+- `channel.state` is `undefined`.
+- You can use remote methods and nest channels.
+
+### Ready
+The channel is established and ready for communication.
+- `channel.ready` is `true`.
+- `channel.closed` is `false`.
+- `channel.promise` is resolved with the channel instance.
+- `channel.state` contains the current state from the server.
+- You can use remote methods and nest channels.
+
+### Closed
+The channel is closed and cannot be used anymore.
+- `channel.ready` is `false`.
+- `channel.closed` is `true`.
+- `channel.promise` is resolved or rejected with the close reason.
+- `channel.state` contains the last known state from the server.
+- You cannot use remote methods or nest channels.
+
+### Events
 Channels have lifecycle events that you can listen to:
 
 ```typescript
@@ -297,4 +485,3 @@ new RPCChannel(handler, options?)
 ## License
 
 MIT
-

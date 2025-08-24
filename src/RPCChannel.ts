@@ -252,7 +252,7 @@ class ChannelManager {
 		this.defaultChannel = new Channel(this, getNextChannelId());
 		this.channels.set(this.defaultChannel.channelId, this.defaultChannel);
 		this.sendMessage = clientMapper(this.onMessage, this.onClose);
-		this.sendMessage(this.defaultChannel.channelId);
+		if (!this.defaultChannel.closed) this.sendMessage(this.defaultChannel.channelId);
 	}
 	
 	createNextChannel(){

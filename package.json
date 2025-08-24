@@ -29,9 +29,7 @@
     "unplugin-dts": "^1.0.0-beta.0",
     "vite": "^7.1.3"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist", "contract.md", "network-examples.md"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
