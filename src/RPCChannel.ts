@@ -1,6 +1,7 @@
 import EventEmitter from "./EventEmitter.js";
+import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
 
-export type RPCChannelHandler = (send: (...messages: any[]) => void, close: (reason?: any) => void) => (...messages: any[]) => void;
+export type RPCChannelHandler = (send: (...messages: RemoteMessage) => void, close: (reason?: any) => void) => (...messages: ClientMessage) => void;
 
 interface MetaScopeValue<M  = any, E  = any, S = any> {[Symbol.unscopables]:{__rpc_methods: M, __rpc_events: E, __rpc_state: S}}
 interface MetaScope<M  = any, E  = any, S = any> { [Symbol.unscopables]: MetaScopeValue<M, E, S>}
@@ -197,23 +198,6 @@ export type RPCChannelEvents<S> = {
 	 * ```
 	 */
 	error: [error: any]
-}
-
-// Code
-
-const enum CLIENT_ACTION {
-	CALL = 0,
-	CLOSE = 1,
-	CREATE = 2,
-	NOTIFY = 3,
-}
-
-const enum REMOTE_ACTION {
-	RESPONSE_OK = 0,
-	CLOSE = 1,
-	STATE = 2,
-	RESPONSE_ERROR = 3,
-	EVENT = 4
 }
 
 /**
@@ -453,12 +437,7 @@ function getEventCode(path: string[], e: string|number|(string|number)[]){
 	return JSON.stringify(Array.isArray(e) ? e : [e]);
 }
 
-const CHANNEL_ID_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-function generateChannelId(): string {
-	let id = "";
-	for (let i = 0; i < 16; i++) {
-		id += CHANNEL_ID_CHARS[Math.floor(Math.random() * CHANNEL_ID_CHARS.length)];
-	}
-	return id;
+function generateChannelId() {
+	return String.fromCharCode(...Array.from({length: 16}).map(() => Math.floor(Math.random() * 65535)))
 }
 export default RPCChannel;

@@ -1,6 +1,7 @@
 import EventEmitter from "./EventEmitter.js";
+import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
 
-export type RPCSourceMessageMapper = (send: (...messages: any[]) => void, close: (reason?: any) => void) => (...messages: any[]) => void;
+export type RPCSourceMessageMapper = (send: (...messages: ClientMessage) => void, close: (reason?: any) => void) => (...messages: RemoteMessage) => void;
 
 
 /**
@@ -42,21 +43,6 @@ type EventPathArgs<PATH extends number|string|(number|string)[], FORM> = (
 		PROP extends keyof FORM ? EventPathArgs<TAIL, FORM[PROP]> : never
 	) : never
 );
-
-const enum CLIENT_ACTION {
-	CALL = 0,
-	CLOSE = 1,
-	CREATE = 2,
-	NOTIFY = 3,
-}
-
-const enum REMOTE_ACTION {
-	RESPONSE_OK = 0,
-	CLOSE = 1,
-	STATE = 2,
-	RESPONSE_ERROR = 3,
-	EVENT = 4
-}
 
 const isConstructable = (fn: any) => {
 	try {
