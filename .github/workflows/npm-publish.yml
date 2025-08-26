@@ -32,49 +32,45 @@ jobs:
       - name: Get version type
         id: get-version-type
         run: |
-          echo "Commit message...";
-          echo "$COMMIT_MESSAGE"
           if [[ -n "$INPUT_VERSION_TYPE" ]]; then
             echo "VERSION_TYPE=$INPUT_VERSION_TYPE" >> "$GITHUB_OUTPUT"
             echo "version type from input: $INPUT_VERSION_TYPE"
           elif [[ "$COMMIT_MESSAGE" =~ \#major($| |\n) ]]; then
             echo "VERSION_TYPE=major" >> "$GITHUB_OUTPUT"
-            echo "version type commit message: major"
+            echo "version type from commit message: major"
           elif [[ "$COMMIT_MESSAGE" =~ \#minor($| |\n) ]]; then
             echo "VERSION_TYPE=minor" >> "$GITHUB_OUTPUT"
-            echo "version type commit message: minor"
+            echo "version type from commit message: minor"
           elif [[ "$COMMIT_MESSAGE" =~ \#patch($| |\n) ]]; then
             echo "VERSION_TYPE=patch" >> "$GITHUB_OUTPUT"
-            echo "version type commit message: patch"
+            echo "version type from commit message: patch"
           else
+            echo "no version type detected"
             exit 1;
           fi
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          VERSION_TYPE: ${{ inputs.VERSION_TYPE }}
+          $INPUT_VERSION_TYPE: ${{ inputs.VERSION_TYPE }}
 
-      - name: Bump version and push tag
+      - name: Update version and push
         run: |
-          echo version type $VERSION_TYPE
-          cat package.json
           git config --global user.email "dpohvar@gmail.com"
           git config --global user.name "GITHUB_ACTIONS"
           npm version $VERSION_TYPE
-          cat package.json
-#          git push origin main --tags
+          git push origin main --tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION_TYPE: ${{ steps.get-version-type.outputs.VERSION_TYPE }}
 
-#      - name: Install (npm)
-#        run: npm clean-install
-#
-#      - name: Build (npm)
-#        run: npm run build
-#
-#      - name: Publish (npm)
-#        run: npm publish --provenance --access public
-#        env:
-#          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_FLINBEIN }}
+      - name: Install (npm)
+        run: npm clean-install
+
+      - name: Build (npm)
+        run: npm run build
+
+      - name: Publish (npm)
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_FLINBEIN }}
 
 
