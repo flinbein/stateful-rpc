@@ -29,6 +29,27 @@ jobs:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Get version type
+        id: get-version-type
+        run: |
+          echo "Commit message..."
+          echo "${{ github.event.head_commit.message }}"
+          if [[-n "{{ inputs.VERSION_TYPE }}"]] then
+            echo "VERSION_TYPE={{ inputs.VERSION_TYPE }}" >> "$GITHUB_OUTPUT"
+            echo "version type from input: ${{ inputs.VERSION_TYPE }}"
+          elif [[ "${{ github.event.head_commit.message }}" =~ \#major($| |\n) ]]; then
+            echo "VERSION_TYPE=major" >> "$GITHUB_OUTPUT"
+            echo "version type commit message: major"
+          elif [[ "${{ github.event.head_commit.message }}" =~ \#minor($| |\n) ]]; then
+            echo "VERSION_TYPE=minor" >> "$GITHUB_OUTPUT"
+            echo "version type commit message: minor"
+          elif [[ "${{ github.event.head_commit.message }}" =~ \#patch($| |\n) ]]; then
+            echo "VERSION_TYPE=patch" >> "$GITHUB_OUTPUT"
+            echo "version type commit message: patch"
+          else
+            exit 1;
+          fi
+
       - name: Bump version and push tag
         run: |
           echo version type $VERSION_TYPE
@@ -40,7 +61,7 @@ jobs:
 #          git push origin main --tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION_TYPE: ${{ inputs.VERSION_TYPE }}
+          VERSION_TYPE: ${{ steps.get-version-type.outputs.VERSION_TYPE }}
 
 #      - name: Install (npm)
 #        run: npm clean-install
