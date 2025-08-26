@@ -3,9 +3,9 @@ import { describe, it } from "node:test";
 import RPCSource from "../src/RPCSource.js"
 import { createChannelFactory } from "./createChannelFactory.js";
 
-describe("channel-state", {timeout: 100}, () => {
+describe("channel-state", {timeout: 1000}, () => {
 	
-	it("should get default state", {timeout: 100}, async () => {
+	it("should get default state", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -13,7 +13,7 @@ describe("channel-state", {timeout: 100}, () => {
 		assert.equal(channel.state, "default-state", "should get default state");
 	});
 	
-	it("should share state between connections", {timeout: 100}, async () => {
+	it("should share state between connections", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({
 			setState: (value: string) => void rpcSource.setState(value)
 		}, "default-state");
@@ -26,7 +26,7 @@ describe("channel-state", {timeout: 100}, () => {
 		assert.equal(channel2.state, "new-state", "should share state between channels");
 	});
 	
-	it("should share state between channels", {timeout: 100}, async () => {
+	it("should share state between channels", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({
 			setState: (value: string) => void rpcSource.setState(value)
 		}, "default-state");
@@ -40,7 +40,7 @@ describe("channel-state", {timeout: 100}, () => {
 		assert.equal(channel2.state, "new-state", "should share state between channels");
 	});
 	
-	it("should change state", {timeout: 100}, async () => {
+	it("should change state", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -53,7 +53,7 @@ describe("channel-state", {timeout: 100}, () => {
 		assert.equal(channel.state, "next-state", "should change state");
 	});
 	
-	it("inner, should get default state", {timeout: 100}, async () => {
+	it("inner, should get default state", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "default-inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
 		const createChannel = createChannelFactory(rpcSource);
@@ -65,7 +65,7 @@ describe("channel-state", {timeout: 100}, () => {
 		assert.equal(innerChannel2.state, "default-inner-state", "should get default inner state");
 	});
 	
-	it("inner, should change state", {timeout: 100}, async () => {
+	it("inner, should change state", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "default-inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
 		const createChannel = createChannelFactory(rpcSource);

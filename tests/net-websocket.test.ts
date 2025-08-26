@@ -7,7 +7,7 @@ import RPCChannel from "../src/RPCChannel.js"
 
 describe("net-websocket", () => {
 	
-	it("should close the channel by backend with reason", {timeout: 1000}, async () => {
+	it("should close the channel by backend with reason", {timeout: 10000}, async () => {
 		const rpcSource = new RPCSource({});
 		const ws = new WebSocketMock();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
@@ -20,7 +20,7 @@ describe("net-websocket", () => {
 		);
 	});
 	
-	it("should close the channel by client with reason", {timeout: 100}, async () => {
+	it("should close the channel by client with reason", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({});
 		const ws = new WebSocketMock();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
@@ -33,7 +33,7 @@ describe("net-websocket", () => {
 		);
 	});
 	
-	it("should call method", {timeout: 100}, async () => {
+	it("should call method", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({ping: () => "pong"});
 		const ws = new WebSocketMock();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});

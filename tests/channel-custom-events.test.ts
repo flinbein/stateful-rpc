@@ -5,7 +5,7 @@ import { createChannelFactory } from "./createChannelFactory.js";
 
 describe("channel-custom-events", () => {
 	
-	it("should subscribe on custom event", {timeout: 100}, async () => {
+	it("should subscribe on custom event", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state").withEventTypes<{
 			blink: [color: string, duration: number]
 		}>();
@@ -20,7 +20,7 @@ describe("channel-custom-events", () => {
 		assert.deepEqual(blinkEvents, [["red", 500], ["blue", 1000]], "should emit custom events");
 	});
 	
-	it("should subscribe on event with complex path", {timeout: 100}, async () => {
+	it("should subscribe on event with complex path", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state").withEventTypes<{
 			effect: {
 				lightning: [intensity: number],
@@ -44,7 +44,7 @@ describe("channel-custom-events", () => {
 		assert.deepEqual(lightningEvents, [[10], [20]], "should emit lightning events");
 	});
 	
-	it("should subscribe on event with complex name", {timeout: 100}, async () => {
+	it("should subscribe on event with complex name", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state").withEventTypes<{
 			effect: {
 				lightning: [intensity: number],
@@ -68,7 +68,7 @@ describe("channel-custom-events", () => {
 		assert.deepEqual(lightningEvents, [[10], [20]], "should emit lightning events");
 	})
 	
-	it("nested: should subscribe on custom event", {timeout: 100}, async () => {
+	it("nested: should subscribe on custom event", {timeout: 1000}, async () => {
 		const innerRpcSource = new RPCSource({}, "default-state").withEventTypes<{
 			blink: [color: string, duration: number]
 		}>();

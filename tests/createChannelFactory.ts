@@ -8,7 +8,10 @@ import RPCChannel from "../src/RPCChannel.js";
  * @param abort Optional AbortSignal to close the connection when aborted.
  * @returns A factory function that creates new RPCChannel instances. All channels share the same RPCSource.
  */
-export function createChannelFactory<T extends RPCSource<any, any>>(rpcSource: T, abort?: AbortSignal): () => RPCChannel<T> {
+export function createChannelFactory<T extends RPCSource<any, any>>(rpcSource: T, abort?: AbortSignal): {
+	(): RPCChannel<T>
+	close(reason?: any): void
+} {
 	const getNextChannelId = ((id = 0) => () => id++)();
 	let sendToSource: (...message: any[]) => void;
 	let channelsSendFunctions = new Set<(...message: any[]) => void>;
@@ -22,7 +25,7 @@ export function createChannelFactory<T extends RPCSource<any, any>>(rpcSource: T
 		return (...message) => setImmediate(() => sendToSource(...message));
 	}, {getNextChannelId});
 	
-	RPCSource.start(rpcSource, (send, close) => {
+	createChannel.close = RPCSource.start(rpcSource, (send, close) => {
 		sendToSource = send;
 		abort?.addEventListener("abort", () => close(abort.reason), {once: true});
 		return (...message) => setImmediate(() => sendToAllChannels(...message));

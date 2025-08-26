@@ -18,6 +18,7 @@
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
+  "types": "dist/index.d.js",
   "scripts": {
     "build": "vite build",
     "test": "node --experimental-websocket --import=./tests/register.js --test --test-reporter spec ./tests/**/*.test.ts"

@@ -1,7 +1,7 @@
 import EventEmitter from "./EventEmitter.js";
 import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
 
-export type RPCChannelHandler = (send: (...messages: RemoteMessage) => void, close: (reason?: any) => void) => (...messages: ClientMessage) => void;
+export type RPCChannelConnection = (send: (...messages: RemoteMessage) => void, close: (reason?: any) => void) => (...messages: ClientMessage) => void;
 
 interface MetaScopeValue<M  = any, E  = any, S = any> {[Symbol.unscopables]:{__rpc_methods: M, __rpc_events: E, __rpc_state: S}}
 interface MetaScope<M  = any, E  = any, S = any> { [Symbol.unscopables]: MetaScopeValue<M, E, S>}
@@ -204,17 +204,21 @@ export type RPCChannelEvents<S> = {
  * Constructor for new RPC channel based on {@link VarhubConnection}
  * @group Classes
  */
-const RPCChannel = (function<M extends MetaScope | MetaDesc = {}>(handler: RPCChannelHandler, options?: {getNextChannelId?: () => string|number}) {
-	const manager = new ChannelManager(handler, options?.getNextChannelId);
+const RPCChannel = (function<M extends MetaScope | MetaDesc = {}>(connection: RPCChannelConnection, options?: {
+	getNextChannelId?: () => string|number,
+	connectionTimeout?: number | AbortSignal
+}) {
+	const manager = new ChannelManager(connection, options?.getNextChannelId, options?.connectionTimeout);
 	return manager.defaultChannel.proxy as RPCChannel<M>;
 } as any as (
 	{
 		/**
 		 * Create new channel for RPC
 		 * @typeParam M - typeof current {@link RPCSource} of room (with methods, constructors and events)
-		 * @param {RPCChannelHandler} handler - message handler
+		 * @param {RPCChannelConnection} connection - message handler
 		 * @param [options]
 		 * @param options.getNextChannelId generator for next channel id, default is random string of 16 characters.
+		 * @param options.connectionTimeout - timeout in milliseconds or {@link AbortSignal} to wait for channel ready state. Default is no timeout.
 		 * @returns {RPCChannelInstance<undefined>} - stateless channel.
 		 * - result extends {@link RPCChannelInstance}.
 		 * - result has all methods of current {@link RPCSource} in room.
@@ -222,21 +226,62 @@ const RPCChannel = (function<M extends MetaScope | MetaDesc = {}>(handler: RPCCh
 		 * - result has constructors for all constructable methods of {@link RPCSource} in room.
 		 * - all constructors are synchronous and return a new {@link RPCChannel}
 		 */
-		new<M extends MetaScope | MetaDesc = {}>(handler: RPCChannelHandler, options?: {getNextChannelId?: () => string|number}): RPCChannel<M>,
+		new<M extends MetaScope | MetaDesc = {}>(
+			connection: RPCChannelConnection,
+			options?: {
+				getNextChannelId?: () => string|number,
+				connectionTimeout?: number | AbortSignal
+			}
+		): RPCChannel<M>,
 	}
 	));
 
 /** @hidden */
 class ChannelManager {
 	defaultChannel: Channel;
-	sendMessage: (...args: any[]) => void;
+	sendMessage: (...args: any[]) => void = () => {};
 	channels = new Map<string|number, Channel>();
 	
-	constructor(clientMapper: RPCChannelHandler, private getNextChannelId: () => string|number = generateChannelId) {
-		this.defaultChannel = new Channel(this, getNextChannelId());
-		this.channels.set(this.defaultChannel.channelId, this.defaultChannel);
-		this.sendMessage = clientMapper(this.onMessage, this.onClose);
-		if (!this.defaultChannel.closed) this.sendMessage(this.defaultChannel.channelId);
+	constructor(
+		connection: RPCChannelConnection,
+		private getNextChannelId: () => string|number = generateChannelId,
+		connectionTimeout?: number | AbortSignal
+	) {
+		const defaultChannel = this.defaultChannel = new Channel(this, getNextChannelId());
+		if (connectionTimeout instanceof AbortSignal && connectionTimeout.aborted) {
+			defaultChannel.close(connectionTimeout.reason);
+			return;
+		}
+		this.channels.set(defaultChannel.channelId, defaultChannel);
+		this.sendMessage = connection(
+			(...args) => this.onMessage(...args),
+			(reason) => this.onClose(reason)
+		);
+		if (!defaultChannel.closed) this.sendMessage(defaultChannel.channelId);
+		if (connectionTimeout != undefined && !defaultChannel.closed && !defaultChannel.ready) {
+			if (typeof connectionTimeout === "number") {
+				const cleanup = () => {
+					clearTimeout(timer);
+					defaultChannel.events.off("ready", cleanup);
+				}
+				defaultChannel.events.once("ready", cleanup);
+				const timer = setTimeout(() => {
+					defaultChannel.close("timeout");
+					cleanup();
+				}, connectionTimeout);
+			} else {
+				const cleanup = () => {
+					(connectionTimeout as AbortSignal).removeEventListener("abort", onAbort);
+					defaultChannel.events.off("ready", cleanup);
+				}
+				function onAbort(){
+					defaultChannel.close((connectionTimeout as AbortSignal).reason);
+					cleanup();
+				}
+				connectionTimeout.addEventListener("abort", onAbort);
+				defaultChannel.events.once("ready", cleanup);
+			}
+		}
 	}
 	
 	createNextChannel(){
@@ -265,6 +310,7 @@ class ChannelManager {
 	}
 	
 	onClose = (reason: any): void => {
+		this.sendMessage = this.onMessage = this.onClose = () => {};
 		for (let channel of this.channels.values()) {
 			channel.onClose(reason);
 		}

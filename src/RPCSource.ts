@@ -1,7 +1,7 @@
 import EventEmitter from "./EventEmitter.js";
 import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
 
-export type RPCSourceMessageMapper = (send: (...messages: ClientMessage) => void, close: (reason?: any) => void) => (...messages: RemoteMessage) => void;
+export type RPCSourceConnection = (send: (...messages: ClientMessage) => void, close: (reason?: any) => void) => (...messages: RemoteMessage) => void;
 
 
 /**
@@ -409,18 +409,47 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 	/**
 	 * start listening for messages and processing procedure calls
 	 * @param rpcSource message handler
-	 * @param handler client handler
+	 * @param connection client's connection
 	 * @param maxChannelsPerClient set a limit on the number of opened channels
 	 * @param context context
 	 */
 	static start(
 		rpcSource: RPCSource<any, any, any>,
-		handler: RPCSourceMessageMapper,
+		connection: RPCSourceConnection,
 		{maxChannelsPerClient = Infinity, context}: {maxChannelsPerClient?: number, context?: any} = {}
 	){
 		const channels = new Map<string|number, RPCSourceChannel>
 		const subscribers = new Map<RPCSource<any, any, any>, (string|number)[]>
-		const sendMessage = handler(onConnectionMessage, close)
+		let sendMessage = connection(
+			(...args) => onMessage(...args),
+			(reason) => onClose(reason)
+		);
+		let onClose = (reason?: any) =>{
+			sendMessage = onMessage = onClose = () => {};
+			closeAll(reason);
+		}
+		let onMessage = (...args: any[]) => {
+			if (args.length === 1) return onMessageInitialize(args[0]);
+			if (args.length < 3) return;
+			const [channelId, operationId, ...msgArgs] = args;
+			const source = channels.get(channelId as any)?.source;
+			if (!source) {
+				sendMessage([channelId], REMOTE_ACTION.CLOSE, new Error("wrong channel"));
+				if (operationId === CLIENT_ACTION.CREATE) {
+					sendMessage(msgArgs[0], REMOTE_ACTION.CLOSE, new Error("wrong channel"));
+				}
+				return;
+			}
+			
+			if (operationId === CLIENT_ACTION.NOTIFY) return onMessageNotify(source, msgArgs[0], msgArgs[1])
+			if (operationId === CLIENT_ACTION.CALL) {
+				if (msgArgs.length === 0) return onMessageRequestState(source, channelId);
+				return void onMessageCallMethod(source, channelId, msgArgs[0], msgArgs[1], msgArgs[2]);
+			}
+			if (operationId === CLIENT_ACTION.CLOSE) return onMessageClose(channelId, msgArgs[0]);
+			
+			if (operationId === CLIENT_ACTION.CREATE) return onMessageCreateChannel(source, msgArgs[0], msgArgs[1], msgArgs[2]);
+		}
 		
 		function onMessageInitialize(channelId: string) {
 			RPCSource.#createChannel(rpcSource, channelId, sendMessage, channels, subscribers)
@@ -475,33 +504,10 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 			}
 		}
 		
-		async function onConnectionMessage(...args: any[]) {
-			if (args.length === 1) return onMessageInitialize(args[0]);
-			if (args.length < 3) return;
-			const [channelId, operationId, ...msgArgs] = args;
-			const source = channels.get(channelId as any)?.source;
-			if (!source) {
-				sendMessage([channelId], REMOTE_ACTION.CLOSE, new Error("wrong channel"));
-				if (operationId === CLIENT_ACTION.CREATE) {
-					sendMessage(msgArgs[0], REMOTE_ACTION.CLOSE, new Error("wrong channel"));
-				}
-				return;
-			}
-			
-			if (operationId === CLIENT_ACTION.NOTIFY) return onMessageNotify(source, msgArgs[0], msgArgs[1])
-			if (operationId === CLIENT_ACTION.CALL) {
-				if (msgArgs.length === 0) return onMessageRequestState(source, channelId);
-				return void onMessageCallMethod(source, channelId, msgArgs[0], msgArgs[1], msgArgs[2]);
-			}
-			if (operationId === CLIENT_ACTION.CLOSE) return onMessageClose(channelId, msgArgs[0]);
-			
-			if (operationId === CLIENT_ACTION.CREATE) return onMessageCreateChannel(source, msgArgs[0], msgArgs[1], msgArgs[2]);
-		}
-		
-		function close(reason?: any){
+		function closeAll(reason?: any){
 			for (const channel of channels.values()) channel.close(reason);
 		}
-		return close;
+		return closeAll;
 	}
 	
 	static #createChannel(

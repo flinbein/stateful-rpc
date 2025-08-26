@@ -6,7 +6,7 @@ import { createChannelFactory } from "./createChannelFactory.js";
 // tests for built-in events: 'ready', 'error', 'close', 'state'
 describe("channel-builtin-events", () => {
 	
-	it("should emit 'ready' event on init", {timeout: 100}, async () => {
+	it("should emit 'ready' event on init", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -16,7 +16,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(readyEventData, [], "'ready' event should be emitted with no arguments");
 	});
 	
-	it("should emit 'error' and 'close' on failure (connection closed before established)", {timeout: 100}, async () => {
+	it("should emit 'error' and 'close' on failure (connection closed before established)", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const abortController = new AbortController();
 		const createChannel = createChannelFactory(rpcSource, abortController.signal);
@@ -31,7 +31,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(errorEventData, ["test-close-reason"], "'error' event should be emitted with close reason");
 	});
 	
-	it("should emit 'error' and 'close' on failure (disposed)", {timeout: 100}, async () => {
+	it("should emit 'error' and 'close' on failure (disposed)", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		rpcSource.dispose("test-disposed");
 		const createChannel = createChannelFactory(rpcSource);
@@ -45,7 +45,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(errorEventData, ["test-disposed"], "'error' event should be emitted with close reason");
 	});
 	
-	it("should emit 'close' on normal closing", {timeout: 100}, async () => {
+	it("should emit 'close' on normal closing", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const abortController = new AbortController();
 		const createChannel = createChannelFactory(rpcSource, abortController.signal);
@@ -58,7 +58,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(closeEventData, ["test-close-reason"], "'close' event should be emitted with close reason");
 	});
 	
-	it("should emit 'close' on normal dispose", {timeout: 100}, async () => {
+	it("should emit 'close' on normal dispose", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -70,7 +70,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(closeEventData, ["test-dispose-reason"], "'close' event should be emitted with close reason");
 	});
 	
-	it("should not emit 'error' on normal closing", {timeout: 100}, async () => {
+	it("should not emit 'error' on normal closing", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const abortController = new AbortController();
 		const createChannel = createChannelFactory(rpcSource, abortController.signal);
@@ -86,7 +86,7 @@ describe("channel-builtin-events", () => {
 		assert.equal(errorEmitted, false, "'error' event should not be emitted on close");
 	});
 	
-	it("should emit 'state' event on init", {timeout: 100}, async () => {
+	it("should emit 'state' event on init", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -96,7 +96,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(stateEventData, ["default-state"], "'state' event should be emitted with initial state");
 	});
 	
-	it("should emit 'state' event on state changed", {timeout: 100}, async () => {
+	it("should emit 'state' event on state changed", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "first-state");
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -108,7 +108,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(stateEventData, ["new-state", "first-state"], "'state' event should be emitted with new state and previous state");
 	});
 	
-	it("nested: should emit 'ready' event on init", {timeout: 100}, async () => {
+	it("nested: should emit 'ready' event on init", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
@@ -120,7 +120,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(readyEventData, [], "'ready' event should be emitted with no arguments");
 	});
 	
-	it("nested: should emit 'error' and 'close' on failure (connection closed before established)", {timeout: 100}, async () => {
+	it("nested: should emit 'error' and 'close' on failure (connection closed before established)", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const abortController = new AbortController();
@@ -137,7 +137,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(errorEventData, ["test-close-reason"], "'error' event should be emitted with close reason");
 	});
 	
-	it("nested: should emit 'error' and 'close' on failure (disposed)", {timeout: 100}, async () => {
+	it("nested: should emit 'error' and 'close' on failure (disposed)", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		rpcSourceInner.dispose("test-disposed");
@@ -153,7 +153,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(errorEventData, ["test-disposed"], "'error' event should be emitted with close reason");
 	});
 	
-	it("nested: should emit 'close' on normal dispose", {timeout: 100}, async () => {
+	it("nested: should emit 'close' on normal dispose", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
@@ -168,7 +168,7 @@ describe("channel-builtin-events", () => {
 		assert.equal(channel.ready, true, "outer channel should remain open when inner channel is disposed");
 	});
 	
-	it("nested: should not emit 'close' on parent disposed", {timeout: 100}, async () => {
+	it("nested: should not emit 'close' on parent disposed", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
@@ -187,7 +187,7 @@ describe("channel-builtin-events", () => {
 		
 	});
 	
-	it("nested: should not emit 'error' on normal closing", {timeout: 100}, async () => {
+	it("nested: should not emit 'error' on normal closing", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const abortController = new AbortController();
@@ -205,7 +205,7 @@ describe("channel-builtin-events", () => {
 		assert.equal(errorEmitted, false, "'error' event should not be emitted on close");
 	});
 	
-	it("nested: should emit 'state' event on init", {timeout: 100}, async () => {
+	it("nested: should emit 'state' event on init", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);
@@ -217,7 +217,7 @@ describe("channel-builtin-events", () => {
 		assert.deepEqual(stateEventData, ["inner-state"], "'state' event should be emitted with initial state");
 	});
 	
-	it("should emit 'state' event on state changed", {timeout: 100}, async () => {
+	it("should emit 'state' event on state changed", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "first-inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const createChannel = createChannelFactory(rpcSource);

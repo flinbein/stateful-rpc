@@ -5,7 +5,7 @@ import RPCSource from "../src/RPCSource.js"
 
 describe("channel-promise", () => {
 	
-	it("should close the channel by backend with reason", async () => {
+	it("should close the channel by backend with reason", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({});
 		const abortController = new AbortController();
 		const createChannel = createChannelFactory(rpcSource, abortController.signal);
@@ -20,7 +20,7 @@ describe("channel-promise", () => {
 		assert.equal(channel.ready, false, "channel should not be ready");
 	});
 	
-	it("should close the channel by dispose", async () => {
+	it("should close the channel by dispose", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({});
 		rpcSource.dispose("test-dispose-reason");
 		const createChannel = createChannelFactory(rpcSource);
@@ -34,7 +34,7 @@ describe("channel-promise", () => {
 		assert.equal(channel.ready, false, "channel should not be ready");
 	});
 	
-	it("should open channel", async () => {
+	it("should open channel", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({});
 		const createChannel = createChannelFactory(rpcSource);
 		const channel = createChannel();
@@ -43,7 +43,7 @@ describe("channel-promise", () => {
 		assert.equal(channel.ready, true, "channel should be ready");
 	})
 	
-	it("inner channel should be rejected on ws close", async () => {
+	it("inner channel should be rejected on ws close", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
 		const abortController = new AbortController();
@@ -68,7 +68,7 @@ describe("channel-promise", () => {
 		assert.equal(innerChannel2.ready, false, "channel 2 should not be ready");
 	});
 	
-	it("inner channel should be resolved", async () => {
+	it("inner channel should be resolved", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
 		const createChannel = createChannelFactory(rpcSource);
@@ -83,7 +83,7 @@ describe("channel-promise", () => {
 		assert.equal(innerChannel2.ready, true, "channel 2 should be ready");
 	})
 	
-	it("inner channel should be rejected on rpcSourceInner dispose", async () => {
+	it("inner channel should be rejected on rpcSourceInner dispose", {timeout: 1000}, async () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		rpcSourceInner.dispose("test-dispose-reason");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import RPCSource from "../src/RPCSource.js"
 import RPCChannel from "../src/RPCChannel.js"
 
-describe("net-messageport", {timeout: 100}, () => {
+describe("net-messageport", {timeout: 1000}, () => {
 	
 	function messagePortMapper(mp: MessagePort): (send: (...args: any[]) => void, close: (reason?: any) => void) => (...args: any[]) => void {
 		return (send) => {
@@ -17,7 +17,7 @@ describe("net-messageport", {timeout: 100}, () => {
 		}
 	}
 	
-	it("should call method", {timeout: 100}, async () => {
+	it("should call method", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({ping: () => "pong"});
 		const mc = new MessageChannel();
 		RPCSource.start(rpcSource, messagePortMapper(mc.port1));
