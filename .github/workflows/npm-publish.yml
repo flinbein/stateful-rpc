@@ -50,7 +50,7 @@ jobs:
           fi
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          $INPUT_VERSION_TYPE: ${{ inputs.VERSION_TYPE }}
+          INPUT_VERSION_TYPE: ${{ inputs.VERSION_TYPE }}
 
       - name: Update version and push
         run: |
