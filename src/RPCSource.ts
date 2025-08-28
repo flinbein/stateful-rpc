@@ -6,7 +6,7 @@ export type RPCSourceConnection = (send: (...messages: ClientMessage) => void, c
 
 /**
  * remote call handler for {@link RPCSource}
- * @param connection - client's connection
+ * @param caller - caller from `RPCSource.start`
  * @param path - path of remote function.
  * For example, when a client calls `rpc.math.sum(1, 2)` path will be `["math", "summ"]`.
  * @param args - arguments with which the remote function was called
@@ -14,11 +14,11 @@ export type RPCSourceConnection = (send: (...messages: ClientMessage) => void, c
  * @param openChannel - true if the client called rpc as constructor (with `new`).
  * In this case the handler must return a {@link RPCSource} or {@link Promise}<{@link RPCSource}>.
  */
-export type RPCHandler = (
-	context: boolean,
+export type RPCHandler<T = any> = (
+	channel: RPCSourceChannel<T>,
 	path: string[],
 	args: any[],
-	openChannel: boolean,
+	newChannel: boolean,
 ) => any | Promise<any> | RPCSource;
 
 /** @hidden */
@@ -57,16 +57,24 @@ const isESClass = (fn: any) => (
 	Function.prototype.toString.call(fn).startsWith("class")
 );
 
-/** @hidden */
+
 class RPCSourceChannel<S = RPCSource> {
 	readonly #source;
 	readonly #closeHook;
 	#closed: boolean = false;
+	#context: any;
 	/** @hidden */
-	constructor(source: RPCSource, closeHook: (reason: any) => void) {
+	constructor(
+		source: RPCSource,
+		closeHook: (reason: any) => void,
+		context: any,
+	) {
 		this.#source = source;
 		this.#closeHook = closeHook;
+		this.#context = context;
 	}
+	
+	get context() {return this.#context}
 	
 	/**
 	 * channel is closed
@@ -86,10 +94,9 @@ class RPCSourceChannel<S = RPCSource> {
 		this.#closeHook(reason);
 	}
 }
+
 /** @hidden */
 export type { RPCSourceChannel };
-
-export type DeepIterable<T> = T | Iterable<DeepIterable<T>>;
 
 type BoxMethods<T, PREFIX extends string> = {
 	[KEY in keyof T as KEY extends `${PREFIX}${infer NAME}` ? NAME : never]: T[KEY]
@@ -103,8 +110,6 @@ type MetaScopeValue<METHODS, EVENTS, STATE> = {
 	}
 }
 
-type RestParams<T extends any[]> = T extends [any, ...infer R] ? R : never;
-
 const dangerPropNames = [
 	"__proto__",
 	"__defineGetter__",
@@ -116,15 +121,14 @@ const dangerPropNames = [
 /**
  * Remote procedure call handler
  */
-export default class RPCSource<METHODS extends Record<string, any> | string = {}, STATE = undefined, EVENTS = any> implements Disposable {
+export default class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = undefined, EVENTS = any> implements Disposable {
 	
 	static with <
 		const BIND_METHODS extends string | Record<string, any> = {},
 		BIND_STATE = undefined,
 		const BIND_EVENTS = {}
-	>(): {
+	>(): {[K in keyof typeof RPCSource]: (typeof RPCSource)[K]} & {
 		new<METHODS extends Record<string, any> | string = BIND_METHODS, STATE = BIND_STATE, EVENTS = BIND_EVENTS>(methods: METHODS, state?: STATE): RPCSource<METHODS, STATE, EVENTS>,
-		prototype: RPCSource<any, any, any>
 	};
 	/**
 	 * Create a new constructor of {@link RPCSource} with bound methods.
@@ -147,9 +151,8 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 		const BIND_METHODS extends Record<string, any> | string = {},
 		BIND_STATE = undefined,
 		const BIND_EVENTS = {}
-	>(methods: BIND_METHODS | RPCHandler): {
-		new<STATE = BIND_STATE, EVENTS = BIND_EVENTS>(state?: STATE): RPCSource<BIND_METHODS, STATE, EVENTS>,
-		prototype: RPCSource<any, any, any>
+	>(methods: BIND_METHODS | RPCHandler): {[K in keyof typeof RPCSource]: (typeof RPCSource)[K]} & {
+		new<STATE = BIND_STATE, EVENTS = BIND_EVENTS>(state?: STATE): RPCSource<BIND_METHODS, STATE, EVENTS>
 	};
 	/**
 	 * Create a new constructor of {@link RPCSource} with bound methods and initial state.
@@ -168,9 +171,8 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 		const BIND_METHODS extends Record<string, any> | string = {},
 		BIND_STATE = undefined,
 		const BIND_EVENTS = {}
-	>(methods: BIND_METHODS | RPCHandler, state: BIND_STATE): {
+	>(methods: BIND_METHODS | RPCHandler, state: BIND_STATE): {[K in keyof typeof RPCSource]: (typeof RPCSource)[K]} & {
 		new<EVENTS = BIND_EVENTS>(): RPCSource<BIND_METHODS, BIND_STATE, EVENTS>,
-		prototype: RPCSource<any, any, any>
 	};
 	static with (this: FunctionConstructor, ...prependArgs: any): any {
 		return class extends this {
@@ -192,6 +194,19 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 	#state?: STATE;
 	/** @hidden */
 	declare public [Symbol.unscopables]: MetaScopeValue<METHODS extends string ? BoxMethods<this, METHODS> : METHODS, EVENTS, STATE>
+	
+	/**
+	 * Proxy-based getter for client's channel
+	 */
+	get channel(): RPCSourceChannel<this> {
+		throw new Error("RPCSource#channel is not available in this context");
+	};
+	/**
+	 * Proxy-based getter for client's channel
+	 */
+	static get channel(): RPCSourceChannel<RPCSource<any, any>> {
+		throw new Error("RPCSource.channel is not available in this context");
+	};
 	
 	/**
 	 * get current state
@@ -241,26 +256,32 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 	 */
 	constructor(handler?: RPCHandler|METHODS, initialState?: STATE) {
 		this.#state = initialState;
-		if (typeof handler === "object") handler = RPCSource.createDefaultHandler({form: handler});
-		else if (typeof handler === "string") handler = RPCSource.createDefaultHandler({form: this}, handler);
+		if (typeof handler === "object") handler = RPCSource.createDefaultHandler({methods: handler, thisValue: this});
+		else if (typeof handler === "string") handler = RPCSource.createDefaultHandler({methods: this, thisValue: this}, handler);
 		this.#handler = handler as any;
 	}
 	
 	/**
 	 * create {@link RPCHandler} based on object with methods
 	 * @param parameters
-	 * @param parameters.form object with methods.
+	 * @param parameters.methods object with methods.
+	 * @param parameters.getThis should return the "this" value for method call.
 	 * @param prefix prefix of used methods, empty by default
 	 * @returns - {@link RPCHandler}
 	 */
-	static createDefaultHandler(parameters: {form: any}, prefix: string = ""): RPCHandler {
+	static createDefaultHandler(
+		parameters: { methods: any, thisValue?: any },
+		prefix: string = ""
+	): RPCHandler {
 		if (prefix) {
 			for (let prop of dangerPropNames) {
-				if (prop.startsWith(prefix)) throw new Error("prefix "+prefix+" is danger");
+				if (prop.startsWith(prefix)) {
+					throw new Error("prefix "+prefix+" is danger");
+				}
 			}
 		}
-		return function(context: any, path: string[], args: any[], openChannel: boolean) {
-			let target: any = parameters?.form;
+		return function(channel: RPCSourceChannel, path: string[], args: any[], newChannel: boolean) {
+			let target: any = parameters?.methods;
 			for (let i=0; i<path.length; i++) {
 				const step = i === 0 ? prefix + path[i] : path[i];
 				if (dangerPropNames.includes(step)) throw new Error("wrong path: "+step+" in ("+prefix+")"+path.join(".")+": forbidden step");
@@ -272,22 +293,31 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 				}
 				target = target[step];
 			}
-			if (openChannel && args.length === 0) {
+			if (newChannel && args.length === 0) {
 				if (target instanceof RPCSource) return target;
 				if (typeof target?.then === "function") return target;
 			}
-			if (openChannel && (target?.prototype instanceof RPCSource) && isESClass(target)) {
+			if (newChannel && (target?.prototype instanceof RPCSource) && isESClass(target)) {
 				const MetaConstructor = function (...args: any){
 					return Reflect.construct(target, args, MetaConstructor);
 				}
 				MetaConstructor.prototype = target.prototype;
-				MetaConstructor.context = context;
+				MetaConstructor.channel = channel;
 				MetaConstructor.autoClose = true;
 				const result: RPCSource = MetaConstructor(...args);
 				result.#autoDispose = MetaConstructor.autoClose
 				return result;
 			}
-			return target.apply(context, args);
+			let thisArg = parameters.thisValue;
+			if (thisArg && (typeof thisArg === "object" || typeof thisArg === "function")) {
+				thisArg = new Proxy(thisArg, {
+					get(target: any, p: string | symbol, receiver: any): any {
+						if (p === "channel") return channel;
+						return Reflect.get(target, p, receiver);
+					}
+				});
+			}
+			return target.apply(thisArg, args);
 		}
 	}
 	
@@ -411,7 +441,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 	 * @param rpcSource message handler
 	 * @param connection client's connection
 	 * @param maxChannelsPerClient set a limit on the number of opened channels
-	 * @param context context
+	 * @param caller caller
 	 */
 	static start(
 		rpcSource: RPCSource<any, any, any>,
@@ -432,8 +462,8 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 			if (args.length === 1) return onMessageInitialize(args[0]);
 			if (args.length < 3) return;
 			const [channelId, operationId, ...msgArgs] = args;
-			const source = channels.get(channelId as any)?.source;
-			if (!source) {
+			const channel = channels.get(channelId as any);
+			if (!channel) {
 				sendMessage([channelId], REMOTE_ACTION.CLOSE, new Error("wrong channel"));
 				if (operationId === CLIENT_ACTION.CREATE) {
 					sendMessage(msgArgs[0], REMOTE_ACTION.CLOSE, new Error("wrong channel"));
@@ -441,38 +471,36 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 				return;
 			}
 			
-			if (operationId === CLIENT_ACTION.NOTIFY) return onMessageNotify(source, msgArgs[0], msgArgs[1])
-			if (operationId === CLIENT_ACTION.CALL) {
-				if (msgArgs.length === 0) return onMessageRequestState(source, channelId);
-				return void onMessageCallMethod(source, channelId, msgArgs[0], msgArgs[1], msgArgs[2]);
-			}
-			if (operationId === CLIENT_ACTION.CLOSE) return onMessageClose(channelId, msgArgs[0]);
+			if (operationId === CLIENT_ACTION.NOTIFY) return onMessageNotify(channel, msgArgs[0], msgArgs[1])
+			if (operationId === CLIENT_ACTION.CALL) return void onMessageCallMethod(channel, channelId, msgArgs[0], msgArgs[1], msgArgs[2]);
+			if (operationId === CLIENT_ACTION.CLOSE) return onMessageClose(channel, channelId, msgArgs[0]);
 			
-			if (operationId === CLIENT_ACTION.CREATE) return onMessageCreateChannel(source, msgArgs[0], msgArgs[1], msgArgs[2]);
+			if (operationId === CLIENT_ACTION.CREATE) return onMessageCreateChannel(channel, msgArgs[0], msgArgs[1], msgArgs[2]);
 		}
 		
 		function onMessageInitialize(channelId: string) {
-			RPCSource.#createChannel(rpcSource, channelId, sendMessage, channels, subscribers)
+			RPCSource.#createChannel(rpcSource, channelId, sendMessage, channels, subscribers, context)
 		}
 		
-		function onMessageNotify(source: RPCSource, path: (string|number)[], args: any[]) {
+		function onMessageNotify(channel: RPCSourceChannel, path: (string|number)[], args: any[]) {
 			try {
-				source.#handler(context, path as any[], args as any[], false);
+				channel.source.#handler(channel, path as any[], args as any[], false);
 			} catch {}
 		}
 		
-		function onMessageRequestState(source: RPCSource, channelId: string) {
+		function onMessageRequestState(channel: RPCSourceChannel, channelId: string) {
 			try {
-				sendMessage([channelId], REMOTE_ACTION.STATE, source.state);
+				sendMessage([channelId], REMOTE_ACTION.STATE, channel.source.state);
 			} catch {
 				sendMessage([channelId], REMOTE_ACTION.STATE, new Error("state parse error"));
 			}
 		}
 		
-		async function onMessageCallMethod(source: RPCSource, channelId: string, callId: any, path: string[], callArgs: any[]) {
+		async function onMessageCallMethod(channel: RPCSourceChannel, channelId: string, callId: any, path: string[], callArgs: any[]) {
 			try {
 				try {
-					const result = await source.#handler(context, path, callArgs, false);
+					const result = await channel.source.#handler(channel, path, callArgs, false);
+					if (channel.closed) return;
 					if (result instanceof RPCSource) throw new Error("wrong data type");
 					sendMessage([channelId], REMOTE_ACTION.RESPONSE_OK, callId, result);
 				} catch (error) {
@@ -483,19 +511,19 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 			}
 		}
 		
-		function onMessageClose(channelId: string, reason: any) {
-			const channel = channels.get(channelId);
+		function onMessageClose(channel: RPCSourceChannel, channelId: string, reason: any) {
 			channels.delete(channelId);
 			channel?.close(reason);
 		}
 		
-		async function onMessageCreateChannel(source: RPCSource, newChannelId: string, path: string[], callArgs: any[]) {
+		async function onMessageCreateChannel(channel: RPCSourceChannel, newChannelId: string, path: string[], callArgs: any[]) {
 			try {
 				try {
 					if (channels.size >= maxChannelsPerClient) throw new Error("channels limit");
-					const result = await source.#handler(context, path, callArgs, true);
+					// todo: send current channel to #handler
+					const result = await channel.source.#handler(channel, path, callArgs, true);
 					if (!(result instanceof RPCSource)) throw new Error("wrong data type");
-					RPCSource.#createChannel(result, newChannelId, sendMessage, channels, subscribers);
+					RPCSource.#createChannel(result, newChannelId, sendMessage, channels, subscribers, context);
 				} catch (error) {
 					sendMessage([newChannelId], REMOTE_ACTION.CLOSE, error as any);
 				}
@@ -516,6 +544,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 		sendMessage: (...args: any[]) => void,
 		channels: Map<string|number, RPCSourceChannel>,
 		subscribers: Map<RPCSource<any, any, any>, (string|number)[]>,
+		context: any
 	): boolean {
 		if (rpcSource.disposed) {
 			try {
@@ -564,7 +593,7 @@ export default class RPCSource<METHODS extends Record<string, any> | string = {}
 			rpcSource.#innerEvents.on("state", onRpcSourceState);
 			rpcSource.#innerEvents.on("dispose", onRpcSourceDispose);
 		}
-		const channel = new RPCSourceChannel(rpcSource, onChannelClose);
+		const channel = new RPCSourceChannel(rpcSource, onChannelClose, context);
 		channels.set(channelId, channel);
 		try {
 			sendMessage([channelId], REMOTE_ACTION.STATE, rpcSource.#state);

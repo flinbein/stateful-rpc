@@ -380,8 +380,8 @@ class Channel {
 				const [type, response] = event.detail;
 				clear(type ? reject: resolve, response);
 			}
-			const onClose = (reason: string | null) => {
-				clear(reject, new Error(reason ?? "connection closed"));
+			const onClose = (reason: any) => {
+				clear(reject, reason);
 			}
 			const clear = <T extends (...args: any[]) => any>(fn: T, ...args: Parameters<T>) => {
 				this.responseEventTarget.removeEventListener(callId as any, onResponse);

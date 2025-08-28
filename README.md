@@ -391,13 +391,13 @@ You can provide a context object when starting the RPC service:
 const users = new Map();
 
 const userService = new RPCSource({
-  // 'this' will be the context object (socket)
-  setName: function(this: WebSocket, name: string) {
-    users.set(this, name);
+  // 'this.channel.context' will be the context object (socket)
+  setName: function(this: RPCSource, name: string) {
+    users.set(this.channel.context, name);
     return true;
   },
-  getName: function(this: WebSocket) {
-    return users.get(this);
+  getName: function(this: RPCSource) {
+    return users.get(this.channel.context);
   }
 });
 
@@ -405,6 +405,9 @@ const userService = new RPCSource({
 wss.on('connection', (socket) => {
   RPCSource.start(userService, wsWrapper(socket), {context: socket});
 });
+
+// You can not access the channel from outside the method
+userService.channel; // throws error
 ```
 
 ## API Reference
@@ -418,10 +421,10 @@ The server-side component that handles remote procedure calls.
 ```typescript
 new RPCSource(methods, initialState = undefined)
 ```
-| Constructor Parameter | Type                | Description                          |
-|-----------------------|---------------------|--------------------------------------|
-| `methods`             | object with methods | methods               |
-| `initialState`        | `<T>`                 | Optional initial state               |
+| Constructor Parameter | Type                | Description            |
+|-----------------------|---------------------|------------------------|
+| `methods`             | object with methods | methods                |
+| `initialState`        | `<T>`               | Optional initial state |
 
 #### Methods
 | Method                | Description                                                                                                                                     |
@@ -439,10 +442,17 @@ new RPCSource(methods, initialState = undefined)
 
 #### Properties
 
-| Property            | Type      | Description                    |
-|---------------------|-----------|--------------------------------|
-| readonly `state`    | `<T>`     | The current state              |
-| readonly `disposed` | `boolean` | Whether the source is disposed |
+| Property            | Type               | Description                                                  |
+|---------------------|--------------------|--------------------------------------------------------------|
+| readonly `state`    | `<T>`              | The current state                                            |
+| readonly `disposed` | `boolean`          | Whether the source is disposed                               |
+| readonly `channel`  | `RPCSourceChannel` | Current channel. Available remote methods via `this.channel` |
+
+#### Static Properties
+
+| Property            | Type               | Description                                                                    |
+|---------------------|--------------------|--------------------------------------------------------------------------------|
+| readonly `channel`  | `RPCSourceChannel` | Current channel.<br/>Available in remote constructors via `new.target.channel` |
 
 ### RPCChannel
 
@@ -489,6 +499,23 @@ new RPCChannel(handler, options?)
 | `"state"` | [`newState`, `oldState?`] | Emitted when the state changes. Handler receives the new state and old state (if available) | 
 | `*`       | [...`*`]                  | Custom events defined in the RPCSource. Handler receives event arguments.                   |
 | `[...*]`  | [...`*`]                  | Nested custom events. Handler receives event arguments.                                     |
+
+### RPCSourceChannel
+
+The remote channel associated with an client's RPCChannel.
+
+#### Properties
+
+| Property  | Type        | Description                                             |
+|-----------|-------------|---------------------------------------------------------|
+| `closed`  | `boolean`   | Whether the remote channel is closed                    |
+| `source`  | `RPCSource` | The associated RPCSource                                |
+| `context` | `any`       | The context object provided when starting the RPCSource |
+
+#### Methods
+| Method                 | Description               |
+|------------------------|---------------------------|
+| `close(reason?)`       | Closes the remote channel |
 
 
 ## Using with WebSocket
@@ -665,14 +692,14 @@ new RPCChannel((send, close) => {/*...*/}, {
   getNextChannelId: () => i++
 });
 ```
-On the server side, the wrapper is created in a similar way:
+On the server side, the wrapper is created similarly:
 ```typescript
 RPCSource.start(rpcSource, (send, close) => {
   return sendToRemote;
 });
 ```
 You can specify the maximum number of channels that can be created by the client.
-You can also specify a context that will be available in RPCSource methods via `this`.
+You can also specify a context that will be available in RPCSource methods via `this.channel.context`.
 ```typescript
 const closeAllChannels = RPCSource.start(rpcSource, (send, close) => {...}, {
   maxChannelsPerClient: 1000, // default is Infinity
