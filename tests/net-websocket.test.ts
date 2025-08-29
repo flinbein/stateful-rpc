@@ -42,7 +42,7 @@ describe("net-websocket", () => {
 		assert.equal(await channel.ping(), "pong", "should call ping method")
 	});
 	
-	it("should call method with context", {timeout: 500}, async () => {
+	it("should call method with channel context", {timeout: 500}, async () => {
 		const websocketNames = new WeakMap<WebSocket, string>();
 		const rpcSource = new RPCSource({
 			setName: function(this: RPCSource, name: string) {
@@ -67,6 +67,32 @@ describe("net-websocket", () => {
 		assert.equal(websocketNames.get(ws1.backend), "test-name-1", "websocketNames should have name for ws1");
 		assert.equal(websocketNames.get(ws2.backend), "test-name-2", "websocketNames should have name for ws2");
 	});
+	
+	it("should call method with context", {timeout: 500}, async () => {
+		const websocketNames = new WeakMap<WebSocket, string>();
+		const rpcSource = new RPCSource({
+			setName: function(this: RPCSource, name: string) {
+				websocketNames.set(this.context, name);
+			},
+			getName: function(this: RPCSource) {
+				return websocketNames.get(this.context);
+			}
+		});
+		using ws1 = new WebSocketMock();
+		using ws2 = new WebSocketMock();
+		ws1.backend.open();
+		ws2.backend.open();
+		RPCSource.start(rpcSource, wsWrapper(ws1.backend), {context: ws1.backend});
+		RPCSource.start(rpcSource, wsWrapper(ws2.backend), {context: ws2.backend});
+		const channel1 = new RPCChannel<typeof rpcSource>(wsWrapper(ws1));
+		const channel2 = new RPCChannel<typeof rpcSource>(wsWrapper(ws2));
+		await channel1.setName("test-name-1");
+		await channel2.setName("test-name-2");
+		assert.equal(await channel1.getName(), "test-name-1", "should call getName method for channel1");
+		assert.equal(await channel2.getName(), "test-name-2", "should call getName method for channel2");
+		assert.equal(websocketNames.get(ws1.backend), "test-name-1", "websocketNames should have name for ws1");
+		assert.equal(websocketNames.get(ws2.backend), "test-name-2", "websocketNames should have name for ws2");
+	})
 	
 	it("should call method with context with class methods", {timeout: 500}, async () => {
 		class TestSource extends RPCSource.with("$") {
@@ -100,7 +126,7 @@ describe("net-websocket", () => {
 		)
 	})
 	
-	it("should call new instance as method ", {timeout: 500}, async () => {
+	it("should call new instance as method", {timeout: 500}, async () => {
 		const websocketNames = new WeakMap<WebSocket, string>();
 		class TestSource extends RPCSource.with("$") {
 			

@@ -209,6 +209,19 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	};
 	
 	/**
+	 * Proxy-based getter for client's context
+	 */
+	get context(): any {
+		return this.channel.context;
+	};
+	/**
+	 * Proxy-based getter for client's context
+	 */
+	static get context(): any {
+		return this.channel.context
+	};
+	
+	/**
 	 * get current state
 	 */
 	get state(): STATE {return this.#state as any}
@@ -276,7 +289,7 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 		if (prefix) {
 			for (let prop of dangerPropNames) {
 				if (prop.startsWith(prefix)) {
-					throw new Error("prefix "+prefix+" is danger");
+					throw new Error("prefix "+prefix+" is forbidden for security reasons");
 				}
 			}
 		}
@@ -293,6 +306,7 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 				}
 				target = target[step];
 			}
+			
 			if (newChannel && args.length === 0) {
 				if (target instanceof RPCSource) return target;
 				if (typeof target?.then === "function") return target;
@@ -307,6 +321,9 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 				const result: RPCSource = MetaConstructor(...args);
 				result.#autoDispose = MetaConstructor.autoClose
 				return result;
+			}
+			if (typeof target !== "function") {
+				throw new Error("wrong path: ("+prefix+")"+path.join(".")+": is not a function");
 			}
 			let thisArg = parameters.thisValue;
 			if (thisArg && (typeof thisArg === "object" || typeof thisArg === "function")) {
@@ -450,10 +467,10 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	){
 		const channels = new Map<string|number, RPCSourceChannel>
 		const subscribers = new Map<RPCSource<any, any, any>, (string|number)[]>
-		let sendMessage = connection(
-			(...args) => onMessage(...args),
-			(reason) => onClose(reason)
-		);
+		let sendMessageQueue: RemoteMessage[]|null = [];
+		let sendMessage = (...args: RemoteMessage) => {
+			sendMessageQueue!.push(args);
+		}
 		let onClose = (reason?: any) =>{
 			sendMessage = onMessage = onClose = () => {};
 			closeAll(reason);
@@ -477,6 +494,13 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 			
 			if (operationId === CLIENT_ACTION.CREATE) return onMessageCreateChannel(channel, msgArgs[0], msgArgs[1], msgArgs[2]);
 		}
+		const sendMessage_connection = connection(
+			(...args) => onMessage(...args),
+			(reason) => onClose(reason)
+		);
+		if (sendMessageQueue) for (let msg of sendMessageQueue) sendMessage_connection(...msg);
+		sendMessageQueue = null;
+		sendMessage = sendMessage_connection;
 		
 		function onMessageInitialize(channelId: string) {
 			RPCSource.#createChannel(rpcSource, channelId, sendMessage, channels, subscribers, context)

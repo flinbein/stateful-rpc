@@ -9,12 +9,12 @@ A lightweight TypeScript library for type-safe Remote Procedure Calls (RPC) with
 - Nested channels support
 - Promise-based API
 - Based on Proxy for dynamic method handling
-- Works with WebSockets, MessagePorts, and more
+- Works with [WebSockets](#using-with-websocket), [MessagePorts](#using-with-sharedworker), and [more](#using-with-other-transports)
 
 ## Table of Contents
 
 - [Installation](#installation)
-- [Basic Usage with WebSockets](#basic-usage-with-websockets)
+- [Basic Usage](#basic-usage)
 - [Channel Lifecycle](#channel-lifecycle)
 - [Builtin Events](#builtin-events)
 - [Calling Remote Methods](#calling-remote-methods)
@@ -31,11 +31,25 @@ A lightweight TypeScript library for type-safe Remote Procedure Calls (RPC) with
 
 ## Installation
 
+### NPM
+Run the following command to install the package:
 ```bash
 npm install @flinbein/stateful-rpc
 ```
+### CDN
+You can use the library directly in the browser via [CDN](https://www.jsdelivr.com/package/npm/@flinbein/stateful-rpc):
+```html
+<script type="module">
+  import { RPCSource, RPCChannel } from 'https://cdn.jsdelivr.net/npm/@flinbein/stateful-rpc@0.2.0/+esm';
+</script>
+```
 
-## Basic Usage with WebSockets
+## Basic Usage
+The library consists of two main components:
+- [RPCSource](#rpcsource): The server-side component that defines methods and manages state
+- [RPCChannel](#rpcchannel): The client-side component that communicates with the RPCSource
+
+Basic example using WebSocket:
 
 Server Side:
 ```typescript
@@ -104,6 +118,9 @@ const socket = new WebSocket('ws://localhost:8080');
 // wait for the WebSocket to open before using the RPC channel
 await new Promise(resolve => socket.onopen = resolve);
 
+// Create RPC channel
+const channel = new RPCChannel<typeof calculator>(createConnection(socket));
+
 const sum = await channel.add(5, 3);
 console.log('5 + 3 =', sum); // 8
 
@@ -121,11 +138,14 @@ channel.close();
 
 ## Channel Lifecycle
 
+An [RPCChannel](#rpcchannel) goes through three states: `pending`, `ready`, and `closed`.
 ```mermaid
 flowchart TD
+  initialize(( )) -- new --> pending
+  pending -- on('error'), on('close') --> closed
   pending -- on('ready'), on('state') --> ready
   ready -- on('close') --> closed
-  pending -- on('error'), on('close') --> closed
+  ready -- on('state') --> ready
 ```
 
 ### Pending
@@ -185,6 +205,14 @@ try {
 ```
 
 ## Calling Remote Methods
+
+You can define methods on the server side by passing an object to the [RPCSource](#rpcsource) constructor.
+
+These methods should return:
+- A value that can be serialized by your transport (e.g., JSON-serializable);
+- A new [RPCSource](#rpcsource) (for open a [nested channel](#nested-channels));
+- A Promise that resolves to one of the above.
+
 Server side:
 ```typescript
 export const mathService = new RPCSource({
@@ -197,6 +225,7 @@ export const mathService = new RPCSource({
 
 RPCSource.start(mathService, connection);
 ```
+
 Client side:
 ```typescript
 const channel = new RPCChannel<typeof mathService>(connection);
@@ -208,15 +237,13 @@ console.log(await channel.math.square(5)); // 25
 channel.logToServer.notify("hello from client"); // void
 ```
 
-Be aware that `this` in RPCSource methods is `undefined` by default.
-You can change it by providing a context object when starting the RPC service.
 
 ## Working with State
 
-The RPCSource maintains a state that can be accessed by clients.
+The [RPCSource](#rpcsource) maintains a state that clients can access.\
 When the state changes, all connected clients are notified.
 
-### Server Side
+Server Side:
 
 ```typescript
 export const counter = new RPCSource({
@@ -234,7 +261,7 @@ export const counter = new RPCSource({
 RPCSource.start(counter, connection);
 ```
 
-### Client Side
+Client Side:
 
 ```typescript
 const channel = new RPCChannel<typeof counter>(connection);
@@ -254,39 +281,35 @@ console.log('State is synchronized:', channel.state === 1); // true
 
 ## Nested Channels
 
-RPCSource allows you to create nested channels for more complex applications.
+[RPCSource](#rpcsource) allows you to create nested channels for more complex applications.\
+You can create a method that returns another [RPCSource](#rpcsource). When the client calls this method as constructor, a new channel is created.
 
-### Server Side
-
+Server Side:
 ```typescript
-const userDetails = new RPCSource({
+const userSource = new RPCSource({
   updateName: (name) => {
-    userDetails.setState({ ...this.state, name });
-    return userDetails.state;
-  },
-  updateEmail: (email) => {
-    userDetails.setState({ ...this.state, email });
-    return userDetails.state;
+    userSource.setState({ ...userSource.state, name });
+    return userSource.state;
   }
 }, { name: "Guest", email: "" });
 
 // Create a main source that provides access to the inner source
 export const mainService = new RPCSource({
-  getUser: () => userDetails
+  User: () => userSource
 });
 
 // Start the RPC service with the main source
 RPCSource.start(mainService, connection);
 ```
 
-### Client Side
+Client Side:
 
 ```typescript
 // Create the main channel
 const mainChannel = new RPCChannel<typeof mainService>(connection);
 
 // Create a nested channel
-const userChannel = new mainChannel.getUser();
+const userChannel = new mainChannel.User();
 
 // Access the nested channel's state
 console.log('User:', userChannel.state); // { name: "Guest", email: "" }
@@ -296,12 +319,28 @@ await userChannel.updateName("John Doe");
 console.log('Updated user:', userChannel.state); // { name: "John Doe", email: "" }
 ```
 
+Another way to define nested channels is to use [class-based](#class-based-rpcsource) approach:
+```typescript
+class User extends RPCSource.with("$", { name: "Guest", email: "" }) {
+  updateName(name) {
+    this.setState({ ...this.state, name });
+    return this.state;
+  }
+};
+
+export const mainService = new RPCSource({
+  User: User // use the class as constructor of nested channel
+});
+
+// Start the RPC service with the main source
+RPCSource.start(mainService, connection);
+```
+The difference is that in this case `new mainChannel.User()` will create a new instance of `User` class for each call.
 ## Custom Events
 
-RPCSource provides a powerful event system that allows the server to emit events to connected clients.
+[RPCSource](#rpcsource) provides a powerful event system that allows the server to emit events to connected clients.
 
-### Server Side
-
+Server Side:
 ```typescript
 import RPCSource from '@flinbein/stateful-rpc/source';
 
@@ -324,7 +363,7 @@ notificationService.emit(["alert", "error"], "ERR_001", "Connection lost");
 
 ```
 
-### Client Side
+Client Side:
 
 ```typescript
 const channel = new RPCChannel<typeof notificationService>(connection);
@@ -344,11 +383,11 @@ channel.on(["alert", "error"], (code, message) => {
   console.log(`Error ${code}: ${message}`);
 });
 ```
-Reserved event names: `state`, `close`, `error`, `ready`.\
+You cannot use reserved event names as string: `state`, `close`, `error`, `ready`.\
 But you can use them as an array path:
 ```typescript
 // server
-source.emit("state", "custom state event", 123);
+source.emit(["state"], "custom state event", 123);
 // client
 channel.on(['state'], (...eventData) => {
   // this is a custom event named "state", not the built-in state event.
@@ -361,6 +400,7 @@ channel.on(['state'], (...eventData) => {
 You can use class-based approach with method prefixes:
 
 ```typescript
+// Server-side
 class Calculator extends RPCSource.with("$") {
   // Prefix is automatically recognized
   $multiply(this: undefined, a: number, b: number) {
@@ -372,9 +412,8 @@ class Calculator extends RPCSource.with("$") {
     return a / b;
   }
 }
-const rpcCalculator = new Calculator();
 
-RPCSource.start(rpcCalculator, connection);
+RPCSource.start(new Calculator(), connection);
 
 // Client-side
 const calculator = new RPCChannel<Calculator>(connection);
@@ -391,30 +430,33 @@ You can provide a context object when starting the RPC service:
 const users = new Map();
 
 const userService = new RPCSource({
-  // 'this.channel.context' will be the context object (socket)
+  // 'this.context' will be the context object (socket)
   setName: function(this: RPCSource, name: string) {
-    users.set(this.channel.context, name);
+    users.set(this.context, name);
     return true;
   },
   getName: function(this: RPCSource) {
-    return users.get(this.channel.context);
+    return users.get(this.context);
   }
 });
 
-// Provide the socket as context
+
 wss.on('connection', (socket) => {
-  RPCSource.start(userService, wsWrapper(socket), {context: socket});
+  // Provide the socket as context
+  RPCSource.start(userService, createConnection(socket), {context: socket});
 });
 
-// You can not access the channel from outside the method
-userService.channel; // throws error
+// You cannot access the channel from outside the method
+userService.context; // throws error
 ```
 
 ## API Reference
 
 ### RPCSource
-
 The server-side component that handles remote procedure calls.
+```typescript
+import RPCSource from "@flinbein/stateful-rpc/source";
+```
 
 #### Constructor
 
@@ -436,23 +478,26 @@ new RPCSource(methods, initialState = undefined)
 | `withEventTypes<E>()` | Sets a new events type                                                                                                                          |
 
 #### Static Methods
-| Method                                   | Description                                                                             |
-|------------------------------------------|-----------------------------------------------------------------------------------------|
-| `start(rpcSource, connection, options?)` | Starts the RPC service with the given source.<br/> Returns a function to close all channels. |
+| Method                                   | Description                                                                                                                                       |
+|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start(rpcSource, connection, options?)` | Starts the RPC service with the given source.<br/> Returns a function to close all channels.                                                      |
+| `with(methods_or_prefix, state?)`        | Binds parameters to RPCSource constructor.<br/> Returns a class that extends RPCSource. Used for [class-based RPCSource](#class-based-rpcsource). |
 
 #### Properties
 
-| Property            | Type               | Description                                                  |
-|---------------------|--------------------|--------------------------------------------------------------|
-| readonly `state`    | `<T>`              | The current state                                            |
-| readonly `disposed` | `boolean`          | Whether the source is disposed                               |
-| readonly `channel`  | `RPCSourceChannel` | Current channel. Available remote methods via `this.channel` |
+| Property            | Type                                            | Description                                                                                      |
+|---------------------|-------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| readonly `state`    | `<T>`                                           | The current state                                                                                |
+| readonly `disposed` | `boolean`                                       | Whether the source is disposed                                                                   |
+| readonly `channel`  | [RPCSourceChannel](#interface-rpcsourcechannel) | Current channel. Available remote methods via `this.channel`                                     |
+| readonly `context`  | `any`                                           | The context object provided when starting the RPCSource. Available in methods via `this.context` |
 
 #### Static Properties
 
-| Property            | Type               | Description                                                                    |
-|---------------------|--------------------|--------------------------------------------------------------------------------|
-| readonly `channel`  | `RPCSourceChannel` | Current channel.<br/>Available in remote constructors via `new.target.channel` |
+| Property           | Type                                            | Description                                                                    |
+|--------------------|-------------------------------------------------|--------------------------------------------------------------------------------|
+| readonly `channel` | [RPCSourceChannel](#interface-rpcsourcechannel) | Current channel.<br/>Available in remote constructors via `new.target.channel` |
+| readonly `context` | `any`                                           | Current context.<br/>Available in remote constructors via `new.target.context` |
 
 ### RPCChannel
 
@@ -468,7 +513,7 @@ new RPCChannel(handler, options?)
 | `handler`                    | `Function`            | A function that handles message sending and receiving                                      |
 | `options?`                   | `object`              | Configuration options                                                                      |
 | `options.getNextChannelId?`  | `Function`            | Function to generate unique channel IDs                                                    |
-| `options.connectionTumeout?` | `number\|AbortSignal` | Timeout for establishing the connection.<br/> Channel will be closed if not ready in time. |
+| `options.connectionTimeout?` | `number\|AbortSignal` | Timeout for establishing the connection.<br/> Channel will be closed if not ready in time. |
 
 #### Properties
 
@@ -500,9 +545,9 @@ new RPCChannel(handler, options?)
 | `*`       | [...`*`]                  | Custom events defined in the RPCSource. Handler receives event arguments.                   |
 | `[...*]`  | [...`*`]                  | Nested custom events. Handler receives event arguments.                                     |
 
-### RPCSourceChannel
+### interface RPCSourceChannel
 
-The remote channel associated with an client's RPCChannel.
+The remote channel associated with a client's RPCChannel.
 
 #### Properties
 
@@ -516,6 +561,102 @@ The remote channel associated with an client's RPCChannel.
 | Method                 | Description               |
 |------------------------|---------------------------|
 | `close(reason?)`       | Closes the remote channel |
+
+
+### Interaction Diagram
+```typescript
+////////// server //////////
+const red = new RPCSource({/*...*/});
+const blue = new RPCSource({/*...*/});
+
+const wss = new WebSocket.Server({/*...*/});
+wss.on("connection", (ws) => {
+  RPCSource.start(red, createConnection(ws, {prefix: "red"}));
+  RPCSource.start(blue, createConnection(ws, {prefix: "blue"}));
+})
+
+////////// client 1 //////////
+const ws1 = new WebSocket("ws://...");
+const channelRed = new RPCChannel<typeof red>(createConnection(ws1, {prefix: "red"}));
+const channelBlue = new RPCChannel<typeof blue>(createConnection(ws1, {prefix: "blue"}));
+
+////////// client 2 //////////
+const ws2 = new WebSocket("ws://...");
+const channelBlue1 = new RPCChannel<typeof red>(createConnection(ws2, {prefix: "blue"}));
+const channelBlue2 = new RPCChannel<typeof blue>(createConnection(ws2, {prefix: "blue"}));
+
+//////////
+function createConnection(ws, {prefix}) {
+  return (send, close) => {
+    ws.on("message", (data) => {
+      const [prefixReceived, ...rest] = JSON.parse(data.toString());
+      if (prefixReceived === prefix) send(...rest);
+    });
+    ws.on("close", () => close("Connection closed"));
+    return (...args) => ws.send(JSON.stringify([prefix, ...args]));
+  };
+}
+```
+```mermaid
+flowchart TB
+    subgraph c1["client 1"]
+        C11["RPCChannel #lt;Red#gt;"]
+        ws1((("Websocket")))
+        C12["RPCChannel #lt;Blue#gt;"]
+    end
+    subgraph c2["client 2"]
+        C21["RPCChannel #lt;Blue#gt;"]
+        C22["RPCChannel #lt;Blue#gt;"]
+        ws2((("Websocket")))
+    end
+    subgraph s1["server"]
+        S1["new RPCSource #lt;Red#gt;"]
+        S2["new RPCSource #lt;Blue#gt;"]
+        wss1((("Websocket")))
+        wss2((("Websocket")))
+        start11[/"RPCSource.start(red)"/]
+        start12[/"RPCSource.start(blue)"/]
+        start21[/"RPCSource.start(blue)"/]
+        S1C11["RPCSourceChannel #lt;Red#gt;"]
+        S1C12["RPCSourceChannel #lt;Blue#gt;"]
+        S1C21["RPCSourceChannel #lt;Blue#gt;"]
+        S1C22["RPCSourceChannel #lt;Blue#gt;"]
+    end
+    ws1 == new RPSChannel(ws) ==> C11 & C12
+    ws2 == new RPSChannel(ws) ==> C21 & C22
+    wss1 ==> start12
+    start11 ==> S1C11
+    start21 ==> S1C21 & S1C22
+    C11 <-. channel data .......-> S1C11
+    C12 <-. channel data .......-> S1C12
+    C21 <-. channel data .......-> S1C21
+    C22 <-. channel data .......-> S1C22
+    S2 ===> start12
+    S2 ===> start21
+    ws1 <-. communication ...-> wss1
+    ws2 <-. communication ...-> wss2
+    S1 ===> start11
+    wss1 ==> start11
+    wss2 ==> start21
+    start12 ==> S1C12
+    
+    style C11 stroke:red
+    style C12 stroke:blue
+    style C21 stroke:blue
+    style C22 stroke:blue
+    style S1 stroke:red
+    style S2 stroke:blue
+    style S1C11 stroke:red
+    style S1C12 stroke:blue
+    style S1C21 stroke:blue
+    style S1C22 stroke:blue
+    
+    linkStyle 8 stroke:red
+    linkStyle 9 stroke:blue
+    linkStyle 10 stroke:blue
+    linkStyle 11 stroke:blue
+
+```
 
 
 ## Using with WebSocket
@@ -586,7 +727,7 @@ const rpc = new RPCChannel<typeof rpcSource>(createConnection(socket));
 console.log(await rpc.ping()); // "pong"
 console.log(await rpc.echo("Hello, World!")); // "Hello, World!"
 ```
-You can implement message serialization in the `wsWrapper` function as you see fit.
+You can implement message serialization in the `createConnection` function as you see fit.
 This example uses JSON, which limits the types of data that can be transmitted.
 
 ## Using with SharedWorker
@@ -597,7 +738,7 @@ import RPCSource from "@flinbein/stateful-rpc/source";
 
 const source = new RPCSource({
   broadcast: (eventName: string, ...args: any) => {
-    void source.emit(eventName, ...args)
+    source.emit(eventName, ...args);
   },
   setState: (value: any) => void source.setState(value)
 });
@@ -623,7 +764,7 @@ onconnect = (event: MessageEvent) => {
 
 console.log("=== SharedWorker done");
 
-export { type source };
+export type { source };
 ```
 Client:
 ```typescript
@@ -667,8 +808,8 @@ channel.on("chatMessage", (from, message) => {
 channel.broadcast.notify("chatMessage", "Me", "Hello!");
 await channel.setState("new-shared-state");
 
-port.postMessage(["close", "closed by user"]);
-port.close();
+sharedWorker.port.postMessage(["close", "closed by user"]);
+sharedWorker.port.close();
 ```
 
 ## Using with Other Transports

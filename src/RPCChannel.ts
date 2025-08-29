@@ -35,24 +35,31 @@ type RPCMethodsAny = {
 }
 
 type RPCMethodsPart<T, EXCLUDE = ExtraKeys> = 0 extends (1 & T) ? RPCMethodsAny : (
+	// if T is an object with properties, map them
 	T extends ((...args: any) => any) | {new (...args: any): any} | MetaScope ? unknown : {
 		[K in Exclude<keyof T & string, EXCLUDE>]: RPCMethodsPart<T[K]>
 	}
-	) & (
+) & (
+	// if T is a function, extract method and constructor
 	T extends (...args: infer A) => infer R ? (
+		// extract as method
 		[R] extends [never] ? RPCMethod<A, R> :
-			Exclude<R, MetaScope> extends infer RC ? ([RC] extends [never] ? unknown : RPCMethod<A, RC>) : unknown
-		) & (
+			Exclude<Awaited<R>, MetaScope> extends infer RC ? ([RC] extends [never] ? unknown : RPCMethod<A, RC>) : unknown
+	) & (
+		// extract as constructor
 		[R] extends [never] ? unknown :
-			Extract<R, MetaScope> extends infer RC extends MetaScope ? RPCConstructor<A, RC>: unknown
-		) : unknown
-	) & (
+			Extract<Awaited<R>, MetaScope> extends infer RC extends MetaScope ? RPCConstructor<A, RC>: unknown
+	) : unknown
+) & (
+	// if T is a constructor of RPCSource, extract constructor
 	T extends (new (...args: infer A) => infer R extends MetaScope) ? RPCConstructor<A, R> : unknown
-	) & (
+) & (
+	// if T is a promise of RPCSource, extract as constructor with no arguments
 	T extends PromiseLike<infer R extends MetaScope> ? RPCConstructor<[], R> : unknown
-	) & (
+) & (
+	// if T is RPCSource, extract as constructor with no arguments
 	T extends MetaScope ? RPCConstructor<[], T> : unknown
-	);
+);
 
 type RPCMethod<A extends any[], R> = {
 	(...args: A): Promise<Awaited<R>>
@@ -422,17 +429,17 @@ class Channel {
 	createProxy(path: string[] = []){
 		const children = new Map<string|number, any>();
 		const events = this.events;
-		const subscribers = {
-			on: function(eventName: string|number|(string|number)[], handler: (...args: any) => void) {
+		const subscribers = new Map<string|symbol, (eventName: string|number|(string|number)[], handler: (...args: any) => void) => void>([
+			["on", function(this: any, eventName: string|number|(string|number)[], handler: (...args: any) => void) {
 				return events.on.call(this, getEventCode(path, eventName), handler);
-			},
-			once: function(eventName: string|number|(string|number)[], handler: (...args: any) => void) {
+			}],
+			["once", function(this: any,eventName: string|number|(string|number)[], handler: (...args: any) => void) {
 				return events.once.call(this, getEventCode(path, eventName), handler);
-			},
-			off: function(eventName: string|number|(string|number)[], handler: (...args: any) => void) {
+			}],
+			["off", function(this: any, eventName: string|number|(string|number)[], handler: (...args: any) => void) {
 				return events.off.call(this, getEventCode(path, eventName), handler);
-			}
-		}
+			}]
+		])
 		const notify = (...args: any) => {
 			void this.sendToChannel(CLIENT_ACTION.NOTIFY, path, args);
 		}
@@ -450,9 +457,10 @@ class Channel {
 				} else {
 					if (prop === "notify") return notify;
 				}
-				if (prop in subscribers) return (subscribers as any)[prop];
+				if (subscribers.has(prop)) return subscribers.get(prop);
 				if (typeof prop !== "string") return undefined;
 				if (children.has(prop)) return children.get(prop);
+				if (prop === "constructor") return RPCChannel;
 				const handler = this.createProxy([...path, prop]);
 				children.set(prop, handler);
 				return handler;
