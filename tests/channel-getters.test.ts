@@ -8,7 +8,7 @@ describe("channel-getters", () => {
 	it("should close the channel by backend with reason", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({});
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		abortController.abort("test-close-reason");
 		await assert.rejects(
@@ -47,7 +47,7 @@ describe("channel-getters", () => {
 		const rpcSourceInner = new RPCSource({}, "innerState");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner});
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		const innerChannel1 = new channel.getInner();
 		const innerChannel2 = new channel.getInner();

@@ -7,13 +7,9 @@ describe("net-messageport", {timeout: 1000}, () => {
 	
 	function messagePortMapper(mp: MessagePort): (send: (...args: any[]) => void, close: (reason?: any) => void) => (...args: any[]) => void {
 		return (send) => {
-			mp.addEventListener("message", (event: MessageEvent) => {
-				send(...event.data);
-			})
+			mp.addEventListener("message", ({data}) => send(...data))
 			mp.start();
-			return async (...args: any[]) => {
-				mp.postMessage(args);
-			}
+			return async (...args: any[]) => mp.postMessage(args);
 		}
 	}
 	

@@ -7,9 +7,17 @@ import RPCChannel from "../src/RPCChannel.js"
 
 describe("net-websocket", () => {
 	
+	function logMessages(wsIn: WebSocket, wsOut: WebSocket) {
+		const result = {in: [] as any[], out: [] as any[]};
+		wsIn.addEventListener("message", ({data}) => result.in.push(data));
+		wsOut.addEventListener("message", ({data}) => result.out.push(data));
+		return result;
+	}
+	
 	it("should close the channel by backend with reason", {timeout: 10000}, async () => {
 		const rpcSource = new RPCSource({});
 		const ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel(wsWrapper(ws));
 		ws.backend.close(4000, "test-close-reason");
@@ -18,11 +26,14 @@ describe("net-websocket", () => {
 			(msg) => msg === "test-close-reason",
 			"should reject with close reason"
 		);
+		assert.equal(wsLog.in.length, 0, "no messages should be received by backend after close");
+		assert.equal(wsLog.out.length, 0, "no messages should be sent by backend after close");
 	});
 	
 	it("should close the channel by client with reason", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({});
 		const ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel(wsWrapper(ws));
 		ws.close(4000, "test-close-reason");
@@ -31,15 +42,21 @@ describe("net-websocket", () => {
 			(msg) => msg === "test-close-reason",
 			"should reject with close reason"
 		);
+		assert.equal(wsLog.in.length, 0, "no messages should be received by backend after close");
+		assert.equal(wsLog.out.length, 0, "no messages should be sent by backend after close");
+		
 	});
 	
 	it("should call method", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({ping: () => "pong"});
 		const ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel<typeof rpcSource>(wsWrapper(ws));
 		ws.backend.open();
-		assert.equal(await channel.ping(), "pong", "should call ping method")
+		assert.equal(await channel.ping(), "pong", "should call ping method");
+		assert.equal(wsLog.in.length, 2, "should be received: state, call-result");
+		assert.equal(wsLog.out.length, 2, "should be sent: init, call");
 	});
 	
 	it("should call method with channel context", {timeout: 500}, async () => {
@@ -54,6 +71,8 @@ describe("net-websocket", () => {
 		});
 		using ws1 = new WebSocketMock();
 		using ws2 = new WebSocketMock();
+		const wsLog1 = logMessages(ws1, ws1.backend);
+		const wsLog2 = logMessages(ws2, ws2.backend);
 		ws1.backend.open();
 		ws2.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws1.backend), {context: ws1.backend});
@@ -66,6 +85,10 @@ describe("net-websocket", () => {
 		assert.equal(await channel2.getName(), "test-name-2", "should call getName method for channel2");
 		assert.equal(websocketNames.get(ws1.backend), "test-name-1", "websocketNames should have name for ws1");
 		assert.equal(websocketNames.get(ws2.backend), "test-name-2", "websocketNames should have name for ws2");
+		assert.equal(wsLog1.in.length, 3, "ws1 should be received: state, call-result, call-result");
+		assert.equal(wsLog1.out.length, 3, "ws1 should be sent: init, call, call");
+		assert.equal(wsLog2.in.length, 3, "ws2 should be received: state, call-result, call-result");
+		assert.equal(wsLog2.out.length, 3, "ws2 should be sent: init, call, call");
 	});
 	
 	it("should call method with context", {timeout: 500}, async () => {
@@ -80,6 +103,8 @@ describe("net-websocket", () => {
 		});
 		using ws1 = new WebSocketMock();
 		using ws2 = new WebSocketMock();
+		const wsLog1 = logMessages(ws1, ws1.backend);
+		const wsLog2 = logMessages(ws2, ws2.backend);
 		ws1.backend.open();
 		ws2.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws1.backend), {context: ws1.backend});
@@ -92,6 +117,10 @@ describe("net-websocket", () => {
 		assert.equal(await channel2.getName(), "test-name-2", "should call getName method for channel2");
 		assert.equal(websocketNames.get(ws1.backend), "test-name-1", "websocketNames should have name for ws1");
 		assert.equal(websocketNames.get(ws2.backend), "test-name-2", "websocketNames should have name for ws2");
+		assert.equal(wsLog1.in.length, 3, "ws1 should be received: state, call-result, call-result");
+		assert.equal(wsLog1.out.length, 3, "ws1 should be sent: init, call, call");
+		assert.equal(wsLog2.in.length, 3, "ws2 should be received: state, call-result, call-result");
+		assert.equal(wsLog2.out.length, 3, "ws2 should be sent: init, call, call");
 	})
 	
 	it("should call method with context with class methods", {timeout: 500}, async () => {
@@ -110,6 +139,7 @@ describe("net-websocket", () => {
 		}
 		const rpcSource = new TestSource();
 		using ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		ws.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		assert.throws(
@@ -123,13 +153,14 @@ describe("net-websocket", () => {
 		assert.throws(
 			() => rpcSource.innerSetName1("another-name"),
 			"should throw if channel is accessed in wrong context"
-		)
+		);
+		assert.equal(wsLog.in.length, 2, "ws should be received: state, call-result");
+		assert.equal(wsLog.out.length, 2, "ws should be sent: init, call");
 	})
 	
 	it("should call new instance as method", {timeout: 500}, async () => {
 		const websocketNames = new WeakMap<WebSocket, string>();
 		class TestSource extends RPCSource.with("$") {
-			
 			$setName(name: string){
 				websocketNames.set(this.channel.context, name);
 			}
@@ -142,6 +173,7 @@ describe("net-websocket", () => {
 		}
 		const rpcSource = new TestSource();
 		using ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		ws.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel<TestSource>(wsWrapper(ws));
@@ -149,6 +181,8 @@ describe("net-websocket", () => {
 		const store = new channel.TextStore();
 		await store.promise;
 		assert.equal(store.state, "created by test-name", "store should be set in constructor");
+		assert.equal(wsLog.in.length, 3, "ws should be received: state, call-result, state");
+		assert.equal(wsLog.out.length, 3, "ws should be sent: init, call, new-channel-init");
 	})
 	
 	it("should close channel by method", {timeout: 500}, async () => {
@@ -159,6 +193,7 @@ describe("net-websocket", () => {
 		}
 		const rpcSource = new TestSource();
 		using ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		ws.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel<TestSource>(wsWrapper(ws));
@@ -168,6 +203,8 @@ describe("net-websocket", () => {
 			"should reject with close reason"
 		);
 		assert.equal(channel.closed, true, "channel should be closed");
+		assert.equal(wsLog.in.length, 2, "ws should be received: state, call-result");
+		assert.equal(wsLog.out.length, 2, "ws should be sent: init, call");
 	})
 	
 	it("should dispose constructed RPCSource", {timeout: 500}, async () => {
@@ -184,6 +221,7 @@ describe("net-websocket", () => {
 		}
 		const rpcSource = new TestSource();
 		using ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		ws.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel<TestSource>(wsWrapper(ws));
@@ -193,10 +231,11 @@ describe("net-websocket", () => {
 		storeChannel.close("some-reason");
 		await channel.ping();
 		assert.equal(store!.disposed, true, "store should be disposed automatically");
+		assert.equal(wsLog.in.length, 3, "ws should be received: state, state, call-result");
+		assert.equal(wsLog.out.length, 4, "ws should be sent: init, new-channel-init, close, call");
 	})
 	
-	it("should dispose constructed RPCSource", {timeout: 500}, async () => {
-		const websocketNames = new WeakMap<WebSocket, string>();
+	it("should not dispose constructed RPCSource", {timeout: 500}, async () => {
 		let store = undefined as RPCSource<any, any> | undefined;
 		class TestSource extends RPCSource.with("$") {
 			$ping = () => "pong";
@@ -211,6 +250,7 @@ describe("net-websocket", () => {
 		}
 		const rpcSource = new TestSource();
 		using ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
 		ws.backend.open();
 		RPCSource.start(rpcSource, wsWrapper(ws.backend), {context: ws.backend});
 		const channel = new RPCChannel<TestSource>(wsWrapper(ws));
@@ -220,5 +260,23 @@ describe("net-websocket", () => {
 		storeChannel.close("some-reason");
 		await channel.ping();
 		assert.equal(store!.disposed, false, "store should not be disposed automatically");
-	})
+		assert.equal(wsLog.in.length, 3, "ws should be received: state, state, call-result");
+		assert.equal(wsLog.out.length, 4, "ws should be sent: init, new-channel-init, close, call");
+	});
+	
+	it("should send state to both channels", {timeout: 500}, async () => {
+		const rpcSource = new RPCSource({
+			setState: (val: string) => rpcSource.setState(val),
+		}, "init-state");
+		using ws = new WebSocketMock();
+		const wsLog = logMessages(ws, ws.backend);
+		ws.backend.open();
+		RPCSource.start(rpcSource, wsWrapper(ws.backend));
+		const channel1 = new RPCChannel<typeof rpcSource>(wsWrapper(ws));
+		const channel2 = new RPCChannel<typeof rpcSource>(wsWrapper(ws));
+		await channel1.setState("state-1");
+		await channel2.setState("state-2");
+		assert.equal(wsLog.in.length, 6, "ws should be received: init-state, init-state, state, call-result, state, call-result");
+		assert.equal(wsLog.out.length, 4, "ws should be sent: init, init, call, call");
+	});
 })

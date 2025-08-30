@@ -16,14 +16,19 @@ A lightweight TypeScript library for type-safe Remote Procedure Calls (RPC) with
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
 - [Channel Lifecycle](#channel-lifecycle)
-- [Builtin Events](#builtin-events)
+- [Built-in Events](#built-in-events)
 - [Calling Remote Methods](#calling-remote-methods)
 - [Working with State](#working-with-state)
 - [Nested Channels](#nested-channels)
 - [Custom Events](#custom-events)
 - [Class-Based RPCSource](#class-based-rpcsource)
 - [Context in RPC Methods](#context-in-rpc-methods)
+- [Validation](#validation)
 - [API Reference](#api-reference)
+  - [RPCSource](#class-rpcsource)
+  - [RPCChannel](#class-rpcchannel)
+  - [RPCSource.Channel](#class-rpcsourcechannel)
+  - [Interaction Diagram](#interaction-diagram)
 - [Using with WebSocket](#using-with-websocket)
 - [Using with SharedWorker](#using-with-sharedworker)
 - [Using with Other Transports](#using-with-other-transports)
@@ -40,14 +45,14 @@ npm install @flinbein/stateful-rpc
 You can use the library directly in the browser via [CDN](https://www.jsdelivr.com/package/npm/@flinbein/stateful-rpc):
 ```html
 <script type="module">
-  import { RPCSource, RPCChannel } from 'https://cdn.jsdelivr.net/npm/@flinbein/stateful-rpc@0.2.0/+esm';
+  import { RPCSource, RPCChannel } from 'https://cdn.jsdelivr.net/npm/@flinbein/stateful-rpc/+esm';
 </script>
 ```
 
 ## Basic Usage
 The library consists of two main components:
-- [RPCSource](#rpcsource): The server-side component that defines methods and manages state
-- [RPCChannel](#rpcchannel): The client-side component that communicates with the RPCSource
+- [RPCSource](#class-rpcsource): The server-side component that defines methods and manages state
+- [RPCChannel](#class-rpcchannel): The client-side component that communicates with the RPCSource
 
 Basic example using WebSocket:
 
@@ -138,14 +143,14 @@ channel.close();
 
 ## Channel Lifecycle
 
-An [RPCChannel](#rpcchannel) goes through three states: `pending`, `ready`, and `closed`.
+An [RPCChannel](#class-rpcchannel) goes through three states: `pending`, `ready`, and `closed`.
 ```mermaid
 flowchart TD
   initialize(( )) -- new --> pending
-  pending -- on('error'), on('close') --> closed
-  pending -- on('ready'), on('state') --> ready
-  ready -- on('close') --> closed
-  ready -- on('state') --> ready
+  pending --> |"on('error'), on('close')"| closed
+  pending --> |"on('ready'), on('state')"| ready
+  ready --->|"on('state')"| ready
+  ready -->|"on('close')"| closed
 ```
 
 ### Pending
@@ -172,7 +177,7 @@ The channel is closed and cannot be used anymore.
 - `channel.state` contains the last known state from the server.
 - You cannot use remote methods or nest channels.
 
-## Builtin Events
+## Built-in Events
 Channels have lifecycle events that you can listen to:
 
 ```typescript
@@ -206,11 +211,12 @@ try {
 
 ## Calling Remote Methods
 
-You can define methods on the server side by passing an object to the [RPCSource](#rpcsource) constructor.
+You can define methods on the server side by passing an object to the [RPCSource](#class-rpcsource) constructor.
 
 These methods should return:
 - A value that can be serialized by your transport (e.g., JSON-serializable);
-- A new [RPCSource](#rpcsource) (for open a [nested channel](#nested-channels));
+- An instance of [RPCSource](#class-rpcsource) (for opening a [nested channel](#nested-channels));
+- A new [RPCSource.Channel](#class-rpcsourcechannel) (for opening a [nested channel](#nested-channels));
 - A Promise that resolves to one of the above.
 
 Server side:
@@ -240,7 +246,7 @@ channel.logToServer.notify("hello from client"); // void
 
 ## Working with State
 
-The [RPCSource](#rpcsource) maintains a state that clients can access.\
+The [RPCSource](#class-rpcsource) maintains a state that clients can access.\
 When the state changes, all connected clients are notified.
 
 Server Side:
@@ -281,8 +287,8 @@ console.log('State is synchronized:', channel.state === 1); // true
 
 ## Nested Channels
 
-[RPCSource](#rpcsource) allows you to create nested channels for more complex applications.\
-You can create a method that returns another [RPCSource](#rpcsource). When the client calls this method as constructor, a new channel is created.
+[RPCSource](#class-rpcsource) allows you to create nested channels for more complex applications.\
+You can create a method that returns another [RPCSource](#class-rpcsource). When the client calls this method as constructor, a new channel is created.
 
 Server Side:
 ```typescript
@@ -336,9 +342,30 @@ export const mainService = new RPCSource({
 RPCSource.start(mainService, connection);
 ```
 The difference is that in this case `new mainChannel.User()` will create a new instance of `User` class for each call.
+
+3rd way is to use [RPCSource.Channel](#class-rpcsourcechannel) to create nested channels manually:
+
+```typescript
+const userSource = new RPCSource({
+	updateName: (name) => {
+		userSource.setState({...userSource.state, name});
+		return userSource.state;
+	}
+}, {name: "Guest", email: ""});
+
+// Create a main source that provides access to the inner source
+export const mainService = new RPCSource({
+	User: () => {
+		const channel = new RPCSource.Channel(userSource);
+		setTimeout(() => channel.close(), 5000); // auto close after 5 seconds
+		return channel;
+  }
+});
+```
+
 ## Custom Events
 
-[RPCSource](#rpcsource) provides a powerful event system that allows the server to emit events to connected clients.
+[RPCSource](#class-rpcsource) provides a powerful event system that allows the server to emit events to connected clients.
 
 Server Side:
 ```typescript
@@ -450,9 +477,74 @@ wss.on('connection', (socket) => {
 userService.context; // throws error
 ```
 
+## Validation
+
+Method `RPCSource.validate(validator, originFn)` allows you to wrap methods with a validator function.
+
+### Parameters
+- `validator`: it takes an array of arguments and returns:
+  - `false`: validation fails
+  - `true`: validation passes, original arguments are used
+  - `any[]`: validation passes, new args will be used as arguments for the original function
+- `originFn`: the original function to be wrapped.
+
+### Returns
+A new function that will be called if validation passes.
+
+
+### Examples:
+```typescript
+
+// assert all arguments are numbers
+function allAreNumbers(params: unknown[]): params is number[] {
+  return params.every(arg => typeof arg === "number"); // returns boolean
+}
+// convert all arguments to numbers
+function allToNumbers(params: unknown[]): number[] {
+  return params.map(arg => Number(arg)); // returns mapped values
+}
+
+const calculator = new RPCSource({
+  add: RPCSource.validate(allAreNumbers, function(...args) {
+    return args.reduce((a, b) => a + b, 0);
+  }),
+  multiply: RPCSource.validate(allToNumbers, function(...args) {
+    return args.reduce((a, b) => a * b, 1);
+  })
+});
+
+////////// client //////////
+await channel.add(1, 2, 3); // returns 6
+await channel.multiply(5, "5"); // returns 25
+await channel.add(1, "2", 3); // throws validation error
+```
+
+You can use libraries like [Zod](https://zod.dev/) to validate method arguments:
+
+```typescript
+import z as * from "zod";
+
+const validateSize = z.tuple([
+  z.number().int().min(0),
+  z.literal(["px", "em", "%"]).optional()
+]).parse;
+
+const sizeStore = new RPCSource({
+  setSize: RPCSource.validate(validateSize, function(size, units = "px") {
+    // typeof size is inferred as number
+    // typeof units is inferred as "px" | "em" | "%"
+    return this.setState(`${size} ${units}`);
+  })
+}, "0px");
+
+//////////  client side //////////
+await channel.setSize(100) // sets state to "100 px"
+await channel.setSize(-5, "em") // throws validation error by Zod
+```
+
 ## API Reference
 
-### RPCSource
+### class RPCSource
 The server-side component that handles remote procedure calls.
 ```typescript
 import RPCSource from "@flinbein/stateful-rpc/source";
@@ -482,38 +574,53 @@ new RPCSource(methods, initialState = undefined)
 |------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `start(rpcSource, connection, options?)` | Starts the RPC service with the given source.<br/> Returns a function to close all channels.                                                      |
 | `with(methods_or_prefix, state?)`        | Binds parameters to RPCSource constructor.<br/> Returns a class that extends RPCSource. Used for [class-based RPCSource](#class-based-rpcsource). |
+| `validate(validator, originFn)`          | Wraps method with a validator function.<br/> Returns a new function that will be called if validation passes. See [validation](#validation)       |
 
 #### Properties
 
-| Property            | Type                                            | Description                                                                                      |
-|---------------------|-------------------------------------------------|--------------------------------------------------------------------------------------------------|
-| readonly `state`    | `<T>`                                           | The current state                                                                                |
-| readonly `disposed` | `boolean`                                       | Whether the source is disposed                                                                   |
-| readonly `channel`  | [RPCSourceChannel](#interface-rpcsourcechannel) | Current channel. Available remote methods via `this.channel`                                     |
-| readonly `context`  | `any`                                           | The context object provided when starting the RPCSource. Available in methods via `this.context` |
+| Property            | Type                                         | Description                                                                                      |
+|---------------------|----------------------------------------------|--------------------------------------------------------------------------------------------------|
+| readonly `state`    | `<T>`                                        | The current state                                                                                |
+| readonly `disposed` | `boolean`                                    | Whether the source is disposed                                                                   |
+| readonly `channel`  | [RPCSource.Channel](#class-rpcsourcechannel) | Current channel. Available remote methods via `this.channel`                                     |
+| readonly `context`  | `any`                                        | The context object provided when starting the RPCSource. Available in methods via `this.context` |
 
 #### Static Properties
 
-| Property           | Type                                            | Description                                                                    |
-|--------------------|-------------------------------------------------|--------------------------------------------------------------------------------|
-| readonly `channel` | [RPCSourceChannel](#interface-rpcsourcechannel) | Current channel.<br/>Available in remote constructors via `new.target.channel` |
-| readonly `context` | `any`                                           | Current context.<br/>Available in remote constructors via `new.target.context` |
+| Property           | Type                                         | Description                                                                    |
+|--------------------|----------------------------------------------|--------------------------------------------------------------------------------|
+| readonly `channel` | [RPCSource.Channel](#class-rpcsourcechannel) | Current channel.<br/>Available in remote constructors via `new.target.channel` |
+| readonly `context` | `any`                                        | Current context.<br/>Available in remote constructors via `new.target.context` |
 
-### RPCChannel
+### class RPCChannel
 
-The client-side component that communicates with an RPCSource.
+The client-side component that communicates with an [RPCSource](#class-rpcsource).
 
 #### Constructor
 
 ```typescript
-new RPCChannel(handler, options?)
+new RPCChannel<S>(connectionHandler, options?)
 ```
 | Constructor Parameters       | Type                  | Description                                                                                |
 |------------------------------|-----------------------|--------------------------------------------------------------------------------------------|
-| `handler`                    | `Function`            | A function that handles message sending and receiving                                      |
+| `<S>`                        | `extends RPCSource`   | Type of the source                                                                         |
+| `connectionHandler`          | `Function`            | A function that handles message sending and receiving                                      |
 | `options?`                   | `object`              | Configuration options                                                                      |
 | `options.getNextChannelId?`  | `Function`            | Function to generate unique channel IDs                                                    |
 | `options.connectionTimeout?` | `number\|AbortSignal` | Timeout for establishing the connection.<br/> Channel will be closed if not ready in time. |
+
+You can specify a generic type `<S>` that corresponds to the [RPCSource](#class-rpcsource) being used.
+In this case, TypeScript will automatically add the corresponding methods and constructors to the channel, and will also allow the use of typed events.
+
+You can also specify types manually in this format:
+```typescript
+new RPCChannel<
+  methods: { /*...*/ },
+  events: {/*...*/},
+  state: /*...*/
+>(connectionHandler, options?)
+```
+
 
 #### Properties
 
@@ -545,23 +652,35 @@ new RPCChannel(handler, options?)
 | `*`       | [...`*`]                  | Custom events defined in the RPCSource. Handler receives event arguments.                   |
 | `[...*]`  | [...`*`]                  | Nested custom events. Handler receives event arguments.                                     |
 
-### interface RPCSourceChannel
+### class RPCSource.Channel
 
 The remote channel associated with a client's RPCChannel.
 
 #### Properties
 
-| Property  | Type        | Description                                             |
-|-----------|-------------|---------------------------------------------------------|
-| `closed`  | `boolean`   | Whether the remote channel is closed                    |
-| `source`  | `RPCSource` | The associated RPCSource                                |
-| `context` | `any`       | The context object provided when starting the RPCSource |
+| Property  | Type            | Description                                              |
+|-----------|-----------------|----------------------------------------------------------|
+| `closed`  | `boolean`       | Whether the remote channel is closed                     |
+| `ready`   | `boolean`       | Whether the remote channel is established                |
+| `source`  | `RPCSource`     | The associated RPCSource                                 |
+| `context` | `any`           | The context object provided when starting the RPCSource  |
+| `promise` | `Promise<this>` | A promise that resolves when the remote channel is ready |
 
 #### Methods
-| Method                 | Description               |
-|------------------------|---------------------------|
-| `close(reason?)`       | Closes the remote channel |
+| Method                 | Description                                   |
+|------------------------|-----------------------------------------------|
+| `close(reason?)`       | Closes the remote channel                     |
+| `on(event, handler)`   | Adds an event listener                        |
+| `once(event, handler)` | Adds a one-time event listener                |
+| `off(event, handler)`  | Removes an event listener                     |
+| `emit(event, ...args)` | Emits an event to associated client's channel |
 
+#### Events
+| Event     | Parameters                | Description                                                            |
+|-----------|---------------------------|------------------------------------------------------------------------|
+| `"close"` | [`reason`]                | Emitted when the channel is closed. Handler receives the close reason. |
+| `"error"` | [`reason`]                | Emitted when an error occurs. Handler receives the error object.       |
+| `"ready"` | [ ]                       | Emitted when the channel is ready.                                     |
 
 ### Interaction Diagram
 ```typescript
@@ -577,15 +696,17 @@ wss.on("connection", (ws) => {
 
 ////////// client 1 //////////
 const ws1 = new WebSocket("ws://...");
+// Connect to "Red" and "Blue" services
 const channelRed = new RPCChannel<typeof red>(createConnection(ws1, {prefix: "red"}));
 const channelBlue = new RPCChannel<typeof blue>(createConnection(ws1, {prefix: "blue"}));
 
 ////////// client 2 //////////
 const ws2 = new WebSocket("ws://...");
+// Connect to "Blue" service twice
 const channelBlue1 = new RPCChannel<typeof red>(createConnection(ws2, {prefix: "blue"}));
 const channelBlue2 = new RPCChannel<typeof blue>(createConnection(ws2, {prefix: "blue"}));
 
-//////////
+////////// shared //////////
 function createConnection(ws, {prefix}) {
   return (send, close) => {
     ws.on("message", (data) => {
@@ -617,10 +738,10 @@ flowchart TB
         start11[/"RPCSource.start(red)"/]
         start12[/"RPCSource.start(blue)"/]
         start21[/"RPCSource.start(blue)"/]
-        S1C11["RPCSourceChannel #lt;Red#gt;"]
-        S1C12["RPCSourceChannel #lt;Blue#gt;"]
-        S1C21["RPCSourceChannel #lt;Blue#gt;"]
-        S1C22["RPCSourceChannel #lt;Blue#gt;"]
+        S1C11["RPCSource.Channel #lt;Red#gt;"]
+        S1C12["RPCSource.Channel #lt;Blue#gt;"]
+        S1C21["RPCSource.Channel #lt;Blue#gt;"]
+        S1C22["RPCSource.Channel #lt;Blue#gt;"]
     end
     ws1 == new RPSChannel(ws) ==> C11 & C12
     ws2 == new RPSChannel(ws) ==> C21 & C22

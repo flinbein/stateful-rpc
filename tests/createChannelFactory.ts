@@ -1,35 +1,44 @@
 import RPCSource from "../src/RPCSource.js";
 import RPCChannel from "../src/RPCChannel.js";
 
-/**
- * Creates a factory function for RPCChannel instances connected to the given RPCSource.
- * Each channel created by the factory will have a unique channel ID.
- * @param rpcSource
- * @param abort Optional AbortSignal to close the connection when aborted.
- * @returns A factory function that creates new RPCChannel instances. All channels share the same RPCSource.
- */
-export function createChannelFactory<T extends RPCSource<any, any>>(rpcSource: T, abort?: AbortSignal): {
-	(): RPCChannel<T>
-	close(reason?: any): void
-} {
-	const getNextChannelId = ((id = 0) => () => id++)();
+export function createChannelFactory<T extends RPCSource<any, any>>(rpcSource: T, params: {
+	signal?: AbortSignal,
+	onCreateChannel?: (channel: RPCSource.Channel, parentChannel: RPCSource.Channel | undefined) => void
+	maxChannelsPerClient?: number
+} = {}) {
+	const { signal, onCreateChannel, maxChannelsPerClient = Infinity } = params;
+	const getNextChannelIdNumber = ((id = 0) => () => id++)();
 	let sendToSource: (...message: any[]) => void;
 	let channelsSendFunctions = new Set<(...message: any[]) => void>;
 	const sendToAllChannels = (...message: any[]) => {
 		for (let channelSend of channelsSendFunctions) channelSend(...message);
 	}
 	
-	const createChannel = () => new RPCChannel<T>((send, close) => {
+	const createChannel = (params: {
+		messageLog?: {in: any[], out: any[]}
+		getNextChannelId?: () => string | number
+		connectionTimeout?: number | AbortSignal
+	} = {}) => new RPCChannel<T>((
+		send, close
+	) => {
+		const { messageLog } = params;
+		if (messageLog) channelsSendFunctions.add((...args) => messageLog.out.push(args));
 		channelsSendFunctions.add(send);
-		abort?.addEventListener("abort", () => close(abort.reason), {once: true});
-		return (...message) => setImmediate(() => sendToSource(...message));
-	}, {getNextChannelId});
+		signal?.addEventListener("abort", () => close(signal.reason), {once: true});
+		return (...message) => setImmediate(() => {
+			if (messageLog) messageLog.in.push(message);
+			sendToSource(...message)
+		});
+	}, {
+		getNextChannelId: params?.getNextChannelId ?? getNextChannelIdNumber,
+		connectionTimeout: params?.connectionTimeout,
+	});
 	
 	createChannel.close = RPCSource.start(rpcSource, (send, close) => {
 		sendToSource = send;
-		abort?.addEventListener("abort", () => close(abort.reason), {once: true});
+		signal?.addEventListener("abort", () => close(signal.reason), {once: true});
 		return (...message) => setImmediate(() => sendToAllChannels(...message));
-	}, {context: createChannel});
+	}, {context: createChannel, onCreateChannel, maxChannelsPerClient});
 	
 	return createChannel;
 }

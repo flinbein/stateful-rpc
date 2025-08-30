@@ -1,6 +1,7 @@
 import * as assert from "node:assert";
 import { describe, it } from "node:test";
 import RPCSource from "../src/RPCSource.js"
+import { createChannelFactory } from "./createChannelFactory.js"
 import { REMOTE_ACTION, CLIENT_ACTION } from "../src/contract.js";
 
 describe("source-security", {timeout: 1000}, () => {
@@ -162,5 +163,30 @@ describe("source-security", {timeout: 1000}, () => {
 		);
 	});
 	
-	
+	it("should block repeated channelId for channel", {timeout: 1000}, async () => {
+		const rpcInner = new RPCSource({}, "inner");
+		const rpcMain = new RPCSource({Inner: () => rpcInner}, "main")
+		let nextId: string;
+		// Simulate an attack by re-using a channel ID
+		const createChannel = createChannelFactory(rpcMain);
+		nextId = "1"
+		const channel1 = createChannel({
+			getNextChannelId: () => nextId
+		});
+		await channel1.promise; // channel created with id = "1";
+		nextId = "2";
+		const subChannel = new channel1.Inner();
+		await subChannel.promise; // sub-channel created with id = "2";
+		const channel2 = createChannel({
+			getNextChannelId: () => nextId
+		}); // channel created with id = "2" - re-used ID
+		
+		await assert.rejects(
+			channel2.promise,
+			err => String(err).includes("channel id conflict"),
+			"second channel with re-used ID should be rejected"
+		);
+		assert.equal(subChannel.closed, true, "all channels wth id = '2' should be closed");
+		assert.equal(channel1.closed, false, "main channel should be ok");
+	})
 })

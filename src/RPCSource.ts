@@ -1,8 +1,10 @@
 import EventEmitter from "./EventEmitter.js";
 import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
+import RPCSourceChannel from "./RPCSourceChannel.js"
+import {getAccessor} from "./RPCSourceChannelAccessor.js"
+import type {MetaScopeValue} from "./type-utils.js";
 
 export type RPCSourceConnection = (send: (...messages: ClientMessage) => void, close: (reason?: any) => void) => (...messages: RemoteMessage) => void;
-
 
 /**
  * remote call handler for {@link RPCSource}
@@ -14,8 +16,8 @@ export type RPCSourceConnection = (send: (...messages: ClientMessage) => void, c
  * @param openChannel - true if the client called rpc as constructor (with `new`).
  * In this case the handler must return a {@link RPCSource} or {@link Promise}<{@link RPCSource}>.
  */
-export type RPCHandler<T = any> = (
-	channel: RPCSourceChannel<T>,
+export type RPCHandler<T extends RPCSource<any, any> = any> = (
+	channel: RPCSource.Channel<T>,
 	path: string[],
 	args: any[],
 	newChannel: boolean,
@@ -57,57 +59,8 @@ const isESClass = (fn: any) => (
 	Function.prototype.toString.call(fn).startsWith("class")
 );
 
-
-class RPCSourceChannel<S = RPCSource> {
-	readonly #source;
-	readonly #closeHook;
-	#closed: boolean = false;
-	#context: any;
-	/** @hidden */
-	constructor(
-		source: RPCSource,
-		closeHook: (reason: any) => void,
-		context: any,
-	) {
-		this.#source = source;
-		this.#closeHook = closeHook;
-		this.#context = context;
-	}
-	
-	get context() {return this.#context}
-	
-	/**
-	 * channel is closed
-	 */
-	get closed() {return this.#closed}
-	/**
-	 * get rpc source
-	 */
-	get source(): S {return this.#source as any;}
-	/**
-	 * close this communication channel
-	 * @param reason
-	 */
-	close(reason?: any){
-		if (this.#closed) return;
-		this.#closed = true;
-		this.#closeHook(reason);
-	}
-}
-
-/** @hidden */
-export type { RPCSourceChannel };
-
 type BoxMethods<T, PREFIX extends string> = {
 	[KEY in keyof T as KEY extends `${PREFIX}${infer NAME}` ? NAME : never]: T[KEY]
-}
-
-type MetaScopeValue<METHODS, EVENTS, STATE> = {
-	[Symbol.unscopables]: {
-		__rpc_methods: METHODS,
-		__rpc_events: EVENTS,
-		__rpc_state: STATE,
-	}
 }
 
 const dangerPropNames = [
@@ -121,7 +74,7 @@ const dangerPropNames = [
 /**
  * Remote procedure call handler
  */
-export default class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = undefined, EVENTS = any> implements Disposable {
+class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = undefined, EVENTS = any> implements Disposable {
 	
 	static with <
 		const BIND_METHODS extends string | Record<string, any> = {},
@@ -189,7 +142,7 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 		message: [eventPath: (string|number)[], eventData: any[]],
 		state: [STATE],
 		dispose: [any],
-		channel: [RPCSourceChannel],
+		channel: [RPCSource.Channel],
 	}>();
 	#state?: STATE;
 	/** @hidden */
@@ -198,13 +151,13 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	/**
 	 * Proxy-based getter for client's channel
 	 */
-	get channel(): RPCSourceChannel<this> {
+	get channel(): RPCSource.Channel<this> {
 		throw new Error("RPCSource#channel is not available in this context");
 	};
 	/**
 	 * Proxy-based getter for client's channel
 	 */
-	static get channel(): RPCSourceChannel<RPCSource<any, any>> {
+	static get channel(): RPCSource.Channel<RPCSource<any, any>> {
 		throw new Error("RPCSource.channel is not available in this context");
 	};
 	
@@ -212,13 +165,13 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	 * Proxy-based getter for client's context
 	 */
 	get context(): any {
-		return this.channel.context;
+		throw new Error("RPCSource#channel is not available in this context");
 	};
 	/**
 	 * Proxy-based getter for client's context
 	 */
 	static get context(): any {
-		return this.channel.context
+		throw new Error("RPCSource#context is not available in this context");
 	};
 	
 	/**
@@ -269,6 +222,11 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	 */
 	constructor(handler?: RPCHandler|METHODS, initialState?: STATE) {
 		this.#state = initialState;
+		Object.defineProperties(this, { // bind methods that have access to private fields
+			emit: {enumerable: false, value: this.emit.bind(this)},
+			setState: {enumerable: false, value: this.setState.bind(this)},
+			dispose: {enumerable: false, value: this.dispose.bind(this)},
+		});
 		if (typeof handler === "object") handler = RPCSource.createDefaultHandler({methods: handler, thisValue: this});
 		else if (typeof handler === "string") handler = RPCSource.createDefaultHandler({methods: this, thisValue: this}, handler);
 		this.#handler = handler as any;
@@ -293,7 +251,7 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 				}
 			}
 		}
-		return function(channel: RPCSourceChannel, path: string[], args: any[], newChannel: boolean) {
+		return function(channel: RPCSource.Channel, path: string[], args: any[], newChannel: boolean) {
 			let target: any = parameters?.methods;
 			for (let i=0; i<path.length; i++) {
 				const step = i === 0 ? prefix + path[i] : path[i];
@@ -317,6 +275,7 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 				}
 				MetaConstructor.prototype = target.prototype;
 				MetaConstructor.channel = channel;
+				MetaConstructor.context = channel.context;
 				MetaConstructor.autoClose = true;
 				const result: RPCSource = MetaConstructor(...args);
 				result.#autoDispose = MetaConstructor.autoClose
@@ -328,9 +287,10 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 			let thisArg = parameters.thisValue;
 			if (thisArg && (typeof thisArg === "object" || typeof thisArg === "function")) {
 				thisArg = new Proxy(thisArg, {
-					get(target: any, p: string | symbol, receiver: any): any {
+					get(target: any /*original*/, p: string | symbol, receiver: any /*proxy*/): any {
 						if (p === "channel") return channel;
-						return Reflect.get(target, p, receiver);
+						if (p === "context") return channel.context;
+						return Reflect.get(target, p, target);
 					}
 				});
 			}
@@ -366,19 +326,20 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	static validate<
 		V extends ((args: any[]) => false | readonly any[]) | ((args: any[]) => args is any[]),
 		A extends (
+			this: RPCSource<any, any>,
 			...args: V extends ((args: any[]) => args is infer R extends any[]) ? R : V extends ((args: any[]) => false | infer R extends readonly any[]) ? R : never
 		) => any
 	>(
 		validator: V,
 		handler: A
 	): NoInfer<A> {
-		return function (...args: any){
+		return function (this: any, ...args: any){
 			const validateResult = validator(args);
 			if (Array.isArray(validateResult)) {
-				return handler(...validateResult as any);
+				return handler.call(this, ...validateResult as any);
 			}
 			if (!validateResult) throw new Error("invalid parameters");
-			return handler(...args);
+			return handler.call(this, ...args);
 		} as any;
 	}
 	
@@ -388,21 +349,21 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	}
 	
 	/** @hidden */
-	setState(state: (oldState: STATE) => STATE): this
+	setState(changeState: (oldState: STATE) => STATE): STATE
 	/**
 	 * set new state
-	 * @param state
+	 * @param newState
 	 * - new state value, if state is not a function.
 	 * - function takes the current state and returns a new one
 	 */
-	setState(state: STATE extends (...args: any) => any ? never : STATE): this
-	setState(state: any): this{
+	setState(newState: STATE extends (...args: any) => any ? never : STATE): STATE
+	setState(state: any): STATE {
 		if (this.disposed) throw new Error("disposed");
 		const newState = typeof state === "function" ? state(this.#state) : state;
-		if (this.#state === newState) return this;
+		if (this.#state === newState) return newState;
 		this.#state = newState;
 		this.#innerEvents.emitWithTry("state", newState);
-		return this;
+		return newState;
 	}
 	
 	/** apply generic types for state. */
@@ -428,11 +389,11 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	emit<P extends 0 extends (1&EVENTS) ? (string|number|(string|number)[]) : EventPath<EVENTS>>(
 		event: P,
 		...args: 0 extends (1&EVENTS) ? any[] : EventPathArgs<P, EVENTS>
-	): this{
+	): this {
 		if (this.#disposed) throw new Error("disposed");
 		const path: (string|number)[] = (typeof event === "string" || typeof event === "number") ? [event] : event;
 		this.#innerEvents.emitWithTry("message", path, args);
-		return this;
+		return this as any;
 	}
 	
 	/**
@@ -463,9 +424,13 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 	static start(
 		rpcSource: RPCSource<any, any, any>,
 		connection: RPCSourceConnection,
-		{maxChannelsPerClient = Infinity, context}: {maxChannelsPerClient?: number, context?: any} = {}
+		{maxChannelsPerClient = Infinity, context, onCreateChannel}: {
+			maxChannelsPerClient?: number,
+			context?: any,
+			onCreateChannel?: (channel: RPCSource.Channel, parentChannel: RPCSource.Channel | undefined) => void
+		} = {}
 	){
-		const channels = new Map<string|number, RPCSourceChannel>
+		const channels = new Map<string|number, RPCSource.Channel>
 		const subscribers = new Map<RPCSource<any, any, any>, (string|number)[]>
 		let sendMessageQueue: RemoteMessage[]|null = [];
 		let sendMessage = (...args: RemoteMessage) => {
@@ -491,7 +456,6 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 			if (operationId === CLIENT_ACTION.NOTIFY) return onMessageNotify(channel, msgArgs[0], msgArgs[1])
 			if (operationId === CLIENT_ACTION.CALL) return void onMessageCallMethod(channel, channelId, msgArgs[0], msgArgs[1], msgArgs[2]);
 			if (operationId === CLIENT_ACTION.CLOSE) return onMessageClose(channel, channelId, msgArgs[0]);
-			
 			if (operationId === CLIENT_ACTION.CREATE) return onMessageCreateChannel(channel, msgArgs[0], msgArgs[1], msgArgs[2]);
 		}
 		const sendMessage_connection = connection(
@@ -503,24 +467,26 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 		sendMessage = sendMessage_connection;
 		
 		function onMessageInitialize(channelId: string) {
-			RPCSource.#createChannel(rpcSource, channelId, sendMessage, channels, subscribers, context)
+			try {
+				const channel = new RPCSource.Channel(rpcSource);
+				onCreateChannel?.(channel, undefined);
+				RPCSource.#initChannel(channel, channelId, sendMessage, channels, subscribers, context, maxChannelsPerClient)
+			}  catch (error) {
+				try {
+					sendMessage([channelId], REMOTE_ACTION.CLOSE, error as any);
+				} catch {
+					sendMessage([channelId], REMOTE_ACTION.CLOSE, "parse error");
+				}
+			}
 		}
 		
-		function onMessageNotify(channel: RPCSourceChannel, path: (string|number)[], args: any[]) {
+		function onMessageNotify(channel: RPCSource.Channel, path: (string|number)[], args: any[]) {
 			try {
 				channel.source.#handler(channel, path as any[], args as any[], false);
 			} catch {}
 		}
 		
-		function onMessageRequestState(channel: RPCSourceChannel, channelId: string) {
-			try {
-				sendMessage([channelId], REMOTE_ACTION.STATE, channel.source.state);
-			} catch {
-				sendMessage([channelId], REMOTE_ACTION.STATE, new Error("state parse error"));
-			}
-		}
-		
-		async function onMessageCallMethod(channel: RPCSourceChannel, channelId: string, callId: any, path: string[], callArgs: any[]) {
+		async function onMessageCallMethod(channel: RPCSource.Channel, channelId: string, callId: any, path: string[], callArgs: any[]) {
 			try {
 				try {
 					const result = await channel.source.#handler(channel, path, callArgs, false);
@@ -535,25 +501,32 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 			}
 		}
 		
-		function onMessageClose(channel: RPCSourceChannel, channelId: string, reason: any) {
+		function onMessageClose(channel: RPCSource.Channel, channelId: string, reason: any) {
 			channels.delete(channelId);
 			channel?.close(reason);
 		}
 		
-		async function onMessageCreateChannel(channel: RPCSourceChannel, newChannelId: string, path: string[], callArgs: any[]) {
+		async function onMessageCreateChannel(channel: RPCSource.Channel, newChannelId: string, path: string[], callArgs: any[]) {
 			try {
-				try {
-					if (channels.size >= maxChannelsPerClient) throw new Error("channels limit");
-					// todo: send current channel to #handler
-					const result = await channel.source.#handler(channel, path, callArgs, true);
-					if (!(result instanceof RPCSource)) throw new Error("wrong data type");
-					RPCSource.#createChannel(result, newChannelId, sendMessage, channels, subscribers, context);
-				} catch (error) {
-					sendMessage([newChannelId], REMOTE_ACTION.CLOSE, error as any);
+				const result = await channel.source.#handler(channel, path, callArgs, true);
+				let createdChannel: RPCSource.Channel;
+				if (result instanceof RPCSource.Channel) {
+					createdChannel = result;
+				} else if (result instanceof RPCSource) {
+					createdChannel = new RPCSource.Channel(result);
+				} else {
+					throw new Error("wrong data type");
 				}
-			} catch {
-				sendMessage([newChannelId], REMOTE_ACTION.CLOSE, "parse error");
+				onCreateChannel?.(createdChannel, channel);
+				RPCSource.#initChannel(createdChannel, newChannelId, sendMessage, channels, subscribers, context, maxChannelsPerClient);
+			} catch (error) {
+				try {
+					sendMessage([newChannelId], REMOTE_ACTION.CLOSE, error as any);
+				} catch {
+					sendMessage([newChannelId], REMOTE_ACTION.CLOSE, "parse error");
+				}
 			}
+			
 		}
 		
 		function closeAll(reason?: any){
@@ -562,68 +535,41 @@ export default class RPCSource<METHODS extends (Record<string, any> | string) = 
 		return closeAll;
 	}
 	
-	static #createChannel(
-		rpcSource: RPCSource<any, any, any>,
+	static #initChannel(
+		channel: RPCSource.Channel<any>,
 		channelId: string|number,
 		sendMessage: (...args: any[]) => void,
-		channels: Map<string|number, RPCSourceChannel>,
+		channels: Map<string|number, RPCSource.Channel>,
 		subscribers: Map<RPCSource<any, any, any>, (string|number)[]>,
-		context: any
+		context: any,
+		maxChannelsPerClient: number
 	): boolean {
-		if (rpcSource.disposed) {
-			try {
-				sendMessage([channelId], REMOTE_ACTION.CLOSE, rpcSource.#disposeReason);
-			} catch {
-				sendMessage([channelId], REMOTE_ACTION.CLOSE, "parse error");
-			}
+		if (channels.size >= maxChannelsPerClient) throw new Error("channels limit");
+		if (channel.ready) throw new Error("channel is already initialized");
+		const accessor = getAccessor(channel);
+		if (!accessor) return false;
+		const alreadyExistsChannel = channels.get(channelId);
+		if (alreadyExistsChannel) {
+			alreadyExistsChannel.close("channel id conflict");
 			return false;
 		}
-		function onRpcSourceMessage(path: (string|number)[], args: any[]){
-			sendMessage(subscribers.get(rpcSource), REMOTE_ACTION.EVENT, path, args);
-		}
-		function onRpcSourceState(state: any){
-			try {
-				sendMessage(subscribers.get(rpcSource), REMOTE_ACTION.STATE, state);
-			} catch {
-				sendMessage(subscribers.get(rpcSource), REMOTE_ACTION.STATE, new Error("state parse error"));
-			}
-		}
-		function onRpcSourceDispose(disposeReason: any){
-			sendMessage(subscribers.get(rpcSource), REMOTE_ACTION.CLOSE, disposeReason);
-			channels.delete(channelId as any);
-			subscribers.delete(rpcSource);
-			cleanup();
-		}
-		function cleanup(){
-			rpcSource.#innerEvents.off("message", onRpcSourceMessage);
-			rpcSource.#innerEvents.off("state", onRpcSourceState);
-			rpcSource.#innerEvents.off("dispose", onRpcSourceDispose);
-		}
-		function onChannelClose(reason?: any){
-			const subscribedChannelsList = subscribers.get(rpcSource) ?? [];
-			subscribedChannelsList.splice(subscribedChannelsList.indexOf(channelId), 1);
-			if (subscribedChannelsList.length === 0) cleanup()
-			const deleted = channels.delete(channelId);
-			if (deleted) sendMessage([channelId], REMOTE_ACTION.CLOSE, reason);
-			if (rpcSource.#autoDispose) rpcSource.dispose(reason);
-		}
-		
-		if (subscribers.has(rpcSource)) {
-			subscribers.get(rpcSource)?.push(channelId);
-		} else {
-			const subscribedChannelsList = [channelId];
-			subscribers.set(rpcSource, subscribedChannelsList);
-			rpcSource.#innerEvents.on("message", onRpcSourceMessage);
-			rpcSource.#innerEvents.on("state", onRpcSourceState);
-			rpcSource.#innerEvents.on("dispose", onRpcSourceDispose);
-		}
-		const channel = new RPCSourceChannel(rpcSource, onChannelClose, context);
-		channels.set(channelId, channel);
-		try {
-			sendMessage([channelId], REMOTE_ACTION.STATE, rpcSource.#state);
-		} catch {
-			sendMessage([channelId], REMOTE_ACTION.STATE, new Error("state parse error"));
-		}
-		return true;
+		return accessor.init({
+			channelId,
+			sendMessage,
+			channels,
+			subscribers,
+			context,
+			disposeReason: channel.source.#disposeReason,
+			getEventEmitter: () => channel.source.#innerEvents,
+			getAutoDispose: () => channel.source.#autoDispose,
+		});
 	}
+	
+	static Channel = RPCSourceChannel;
 }
+
+declare namespace RPCSource {
+	export type Channel<T extends RPCSource<any, any> = RPCSource<any, any>> = RPCSourceChannel<T>
+}
+
+export default RPCSource

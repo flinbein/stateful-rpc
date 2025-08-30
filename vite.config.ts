@@ -1,4 +1,5 @@
 import type { UserConfig } from 'vite'
+// @ts-ignore
 import dts from 'unplugin-dts/vite'
 
 export default {
@@ -12,6 +13,6 @@ export default {
 		},
 	},
 	plugins: [dts({
-		exclude: ["src/EventEmitter.ts"],
+		exclude: ["src/EventEmitter.ts", "src/RPCSourceChannelAccessor.ts"],
 	})]
 } satisfies UserConfig;

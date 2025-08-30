@@ -1,10 +1,8 @@
 import EventEmitter from "./EventEmitter.js";
 import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
+import type { MetaScope, EventPathArgs, EventPath } from "./type-utils.js";
 
 export type RPCChannelConnection = (send: (...messages: RemoteMessage) => void, close: (reason?: any) => void) => (...messages: ClientMessage) => void;
-
-interface MetaScopeValue<M  = any, E  = any, S = any> {[Symbol.unscopables]:{__rpc_methods: M, __rpc_events: E, __rpc_state: S}}
-interface MetaScope<M  = any, E  = any, S = any> { [Symbol.unscopables]: MetaScopeValue<M, E, S>}
 
 interface MetaDesc<M = any, E = any, S = any> {
 	methods?: M;
@@ -79,28 +77,6 @@ type RPCConstructor<A extends any[], R extends MetaScope> = {
 	name: never,
 	length: never
 }
-
-type EventPath<T, K extends keyof T = keyof T> = (
-	K extends (string|number) ? (
-		T[K] extends infer P ? (
-			0 extends (1 & P) ? (K | [K, ...(number|string)[]]) :
-				P extends unknown[] ? (K | [K]) : [K, ...(
-					EventPath<T[K]> extends infer NEXT extends ((string|number)|(string|number)[]) ? (
-						NEXT extends any[] ? NEXT : [NEXT]
-						) : never
-					)]
-			): never
-		) : never
-	);
-
-type EventPathArgs<PATH extends number|string|(number|string)[], FORM> = (
-	0 extends (1 & FORM) ? any[] :
-		PATH extends (number|string) ? EventPathArgs<[PATH], FORM> :
-			PATH extends [] ? FORM extends any[] ? 0 extends (1 & FORM) ? any[] : FORM : never :
-				PATH extends [infer PROP, ...infer TAIL extends (number|string)[]] ? (
-					PROP extends keyof FORM ? EventPathArgs<TAIL, FORM[PROP]> : never
-					) : never
-	);
 
 interface EventHandler<F, SPECIAL_EVENTS extends string> {
 	on<E extends Exclude<EventPath<F>, SPECIAL_EVENTS>>(this: this, eventName: E, handler: (...args: EventPathArgs<E, F>) => void): this,
@@ -293,6 +269,7 @@ class ChannelManager {
 	
 	createNextChannel(){
 		const channelId = this.getNextChannelId();
+		if (this.channels.has(channelId)) throw new Error(`channel with id '${channelId}' already exists, channel id conflict`);
 		const channel = new Channel(this, channelId);
 		this.channels.set(channelId, channel);
 		return channel;

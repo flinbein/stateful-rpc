@@ -19,7 +19,7 @@ describe("channel-builtin-events", () => {
 	it("should emit 'error' and 'close' on failure (connection closed before established)", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		let closeEventData: any[] | undefined;
 		channel.on("close", (...args) => closeEventData = args);
@@ -48,7 +48,7 @@ describe("channel-builtin-events", () => {
 	it("should emit 'close' on normal closing", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		await channel.promise;
 		const closeEventData = await new Promise<any[]>(resolve => {
@@ -73,7 +73,7 @@ describe("channel-builtin-events", () => {
 	it("should not emit 'error' on normal closing", {timeout: 1000}, async () => {
 		const rpcSource = new RPCSource({}, "default-state");
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		let errorEmitted = false;
 		channel.on("error", () => errorEmitted = true);
@@ -124,7 +124,7 @@ describe("channel-builtin-events", () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		const innerChannel = new channel.getInner();
 		let closeEventData: any[] | undefined;
@@ -191,7 +191,7 @@ describe("channel-builtin-events", () => {
 		const rpcSourceInner = new RPCSource({}, "inner-state");
 		const rpcSource = new RPCSource({getInner: () => rpcSourceInner}, "default-state");
 		const abortController = new AbortController();
-		const createChannel = createChannelFactory(rpcSource, abortController.signal);
+		const createChannel = createChannelFactory(rpcSource, {signal: abortController.signal});
 		const channel = createChannel();
 		const innerChannel = new channel.getInner();
 		let errorEmitted = false;
