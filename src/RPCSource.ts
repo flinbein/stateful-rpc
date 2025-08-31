@@ -324,17 +324,21 @@ class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = und
 	 * ```
 	 */
 	static validate<
-		V extends ((args: any[]) => false | readonly any[]) | ((args: any[]) => args is any[]),
+		V extends ((this: RPCSource<any, any>, args: any[]) => boolean | readonly any[]) | ((this: RPCSource<any, any>, args: any[]) => args is any[]),
 		A extends (
 			this: RPCSource<any, any>,
-			...args: V extends ((args: any[]) => args is infer R extends any[]) ? R : V extends ((args: any[]) => false | infer R extends readonly any[]) ? R : never
+			...args: (V extends ((args: any[]) => args is infer R extends any[]) ? R : (
+				V extends ((args: any[]) => false | infer R extends readonly any[]) ? R : (
+					Parameters<V>[0]
+				)
+			))
 		) => any
 	>(
 		validator: V,
 		handler: A
 	): NoInfer<A> {
 		return function (this: any, ...args: any){
-			const validateResult = validator(args);
+			const validateResult = (validator as any).call(this, args);
 			if (Array.isArray(validateResult)) {
 				return handler.call(this, ...validateResult as any);
 			}

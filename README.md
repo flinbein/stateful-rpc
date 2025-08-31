@@ -541,6 +541,21 @@ const sizeStore = new RPCSource({
 await channel.setSize(100) // sets state to "100 px"
 await channel.setSize(-5, "em") // throws validation error by Zod
 ```
+You can also validate a context object:
+```typescript
+function validateContext(this: RPCSource, args: any[]) {
+  if (!this.context.url.includes("?admin")) throw new Error("wrong context");
+  return true;
+}
+const rpc = new RPCSource({
+  echo: RPCSource.validate(validateContext, function(value) {
+    return "Echo: " + value;
+  }),
+});
+//////////  client side //////////
+await channel.echo("i am admin") // throws "wrong context" error if context.url does not include "?admin"
+
+```
 
 ## API Reference
 
