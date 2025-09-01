@@ -4,7 +4,7 @@ import RPCSourceChannel from "./RPCSourceChannel.js"
 import {getAccessor} from "./RPCSourceChannelAccessor.js"
 import type {MetaScopeValue} from "./type-utils.js";
 
-export type RPCSourceConnection = (send: (...messages: ClientMessage) => void, close: (reason?: any) => void) => (...messages: RemoteMessage) => void;
+export type RPCSourceConnection = (onMessage: (...messages: ClientMessage) => void, onClose: (reason?: any) => void) => (...messages: RemoteMessage) => void;
 
 /**
  * remote call handler for {@link RPCSource}
@@ -300,20 +300,23 @@ class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = und
 	
 	/**
 	 * Create function with validation of arguments
-	 * @param validator function to validate arguments. `(args) => boolean | any[]`
-	 * - args - array of validating values
+	 * @param normalizer function to normalize arguments. `(args) => boolean | any[]`
+	 * - `args` - array of values passed to the handler
 	 * - returns:
-	 *   - `true` - pass args to the target function
-	 *   - `false` - validation error will be thrown
-	 *   - `any[]` - replace args and pass to the target function
-	 * - throws: error will be thrown
+	 *   - `true` - pass args to the handler
+	 *   - `false` - error will be thrown
+	 *   - `any[]` - pass the changed args to the handler
+	 * - `this` - will be set to the current instance of {@link RPCSource}
+	 * - if `normalizer` is a type guard, then the types of arguments of `handler` will be inferred from it.
+	 * - if `normalizer` returns `any[]`, then the types of arguments of `handler` will be inferred from it.
+	 * - if `normalizer` returns `true`, then the types of arguments of `handler` will be the same as the types of arguments of `normalizer`.
 	 * @param handler - target function
-	 * @returns a new function with validation of arguments
+	 * @returns a new function that first calls `normalizer`, and if it returns `true` or `any[]`, then calls `handler`.
 	 * @example
 	 * ```typescript
-	 * const validateString = (args: any[]) => args.length === 1 && [String(args[0])] as const;
+	 * const normalizeString = (args: any[]) => args.length === 1 && [String(args[0])] as const;
 	 *
-	 * const fn = RPCSource.validate(validateString, (arg) => {
+	 * const fn = RPCSource.normalize(normalizeString, (arg) => {
 	 *   return arg.toUpperCase() // <-- string
 	 * });
 	 *
@@ -323,7 +326,7 @@ class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = und
 	 * fn("foo", "bar"); // throws error
 	 * ```
 	 */
-	static validate<
+	static normalize<
 		V extends ((this: RPCSource<any, any>, args: any[]) => boolean | readonly any[]) | ((this: RPCSource<any, any>, args: any[]) => args is any[]),
 		A extends (
 			this: RPCSource<any, any>,
@@ -334,18 +337,24 @@ class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = und
 			))
 		) => any
 	>(
-		validator: V,
+		normalizer: V,
 		handler: A
 	): NoInfer<A> {
 		return function (this: any, ...args: any){
-			const validateResult = (validator as any).call(this, args);
-			if (Array.isArray(validateResult)) {
-				return handler.call(this, ...validateResult as any);
+			const normalizeResult = (normalizer as any).call(this, args);
+			if (Array.isArray(normalizeResult)) {
+				return handler.call(this, ...normalizeResult as any);
 			}
-			if (!validateResult) throw new Error("invalid parameters");
+			if (!normalizeResult) throw new Error("invalid parameters");
 			return handler.call(this, ...args);
 		} as any;
 	}
+	
+	/**
+	 * @deprecated
+	 * @see {@link RPCSource.normalize}
+	 */
+	static validate = this.normalize;
 	
 	/** apply generic types for events */
 	withEventTypes<E = EVENTS>(): RPCSource<METHODS, STATE, E>{

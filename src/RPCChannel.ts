@@ -2,7 +2,7 @@ import EventEmitter from "./EventEmitter.js";
 import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
 import type { MetaScope, EventPathArgs, EventPath } from "./type-utils.js";
 
-export type RPCChannelConnection = (send: (...messages: RemoteMessage) => void, close: (reason?: any) => void) => (...messages: ClientMessage) => void;
+export type RPCChannelConnection = (onMessage: (...messages: RemoteMessage) => void, onClose: (reason?: any) => void) => (...messages: ClientMessage) => void;
 
 interface MetaDesc<M = any, E = any, S = any> {
 	methods?: M;

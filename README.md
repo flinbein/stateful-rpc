@@ -23,7 +23,7 @@ A lightweight TypeScript library for type-safe Remote Procedure Calls (RPC) with
 - [Custom Events](#custom-events)
 - [Class-Based RPCSource](#class-based-rpcsource)
 - [Context in RPC Methods](#context-in-rpc-methods)
-- [Validation](#validation)
+- [Normalization](#normalization)
 - [API Reference](#api-reference)
   - [RPCSource](#class-rpcsource)
   - [RPCChannel](#class-rpcchannel)
@@ -74,14 +74,14 @@ export const calculator = new RPCSource({
 
 // Create a connection handler for WebSocket
 function createConnection(socket) {
-  return (send, close) => {
+  return (onMessage, onClose) => {
     // Handle incoming messages from the WebSocket
     socket.on("message", (data) => {
-      send(...JSON.parse(data.toString()));
+      onMessage(...JSON.parse(data.toString()));
     });
   
     // Handle WebSocket closure
-    socket.on("close", () => close("Client disconnected"));
+    socket.on("close", () => onClose("Client disconnected"));
 
     // Return a function to send messages back to the client
     return (...args) => socket.send(JSON.stringify(args));
@@ -106,12 +106,12 @@ import type { calculator } from './server';
 
 // Create a connection handler for WebSocket
 function createConnection(socket: WebSocket){
-  return (send, close) => {
+  return (onMessage, onClose) => {
     socket.onmessage = (event) => {
-      send(...JSON.parse(event.data));
+      onMessage(...JSON.parse(event.data));
     };
     
-    socket.onclose = () => close('Connection closed');
+    socket.onclose = () => onClose('Connection closed');
     
     return (...args) => socket.send(JSON.stringify(args));
   };
@@ -272,6 +272,9 @@ Client Side:
 ```typescript
 const channel = new RPCChannel<typeof counter>(connection);
 
+// Wait for the channel to receive the initial state
+await channel.promise;
+
 // Get the current state
 console.log('Current count:', channel.state); // 0
 
@@ -317,6 +320,9 @@ const mainChannel = new RPCChannel<typeof mainService>(connection);
 // Create a nested channel
 const userChannel = new mainChannel.User();
 
+// Wait until the channel receives the initial state
+await userChannel.promise; 
+
 // Access the nested channel's state
 console.log('User:', userChannel.state); // { name: "Guest", email: "" }
 
@@ -328,7 +334,7 @@ console.log('Updated user:', userChannel.state); // { name: "John Doe", email: "
 Another way to define nested channels is to use [class-based](#class-based-rpcsource) approach:
 ```typescript
 class User extends RPCSource.with("$", { name: "Guest", email: "" }) {
-  updateName(name) {
+  $updateName(name) {
     this.setState({ ...this.state, name });
     return this.state;
   }
@@ -424,11 +430,32 @@ channel.on(['state'], (...eventData) => {
 
 ## Class-Based RPCSource
 
-You can use class-based approach with method prefixes:
+The constructor of [RPCSource](#class-rpcsource) can accept a string (prefix) instead of an object with methods.\
+In this case, all methods of the object whose names start with the specified prefix will be used as remote methods.
+```typescript
+const myService = new RPCSource("$");
+// by default, `source` does not contain methods starting with `$`
+// but you can add them later:
+myService.$ping = () => "pong"; // add the "ping" method
+```
+you can extend class `RPCSource` to define methods:
 
 ```typescript
+class MyService extends RPCSource<"$", string> {
+  constructor(initialState) {
+    super("$", initialState);
+  }
+  $ping() {
+    return "pong";
+  }
+}
+const myService = new MyService("default state");
+````
+You can use the static method `RPCSource.with(prefix, state?)`.
+This method returns a class inherited from RPCSource, and the specified parameters will be automatically passed to its constructor.
+```typescript
 // Server-side
-class Calculator extends RPCSource.with("$") {
+class Calculator extends RPCSource.with("$") { // "$" is bound to the constructor
   // Prefix is automatically recognized
   $multiply(this: undefined, a: number, b: number) {
     return a * b;
@@ -446,7 +473,6 @@ RPCSource.start(new Calculator(), connection);
 const calculator = new RPCChannel<Calculator>(connection);
 const result = await calculator.multiply(5, 3); // Calls $multiply on the server
 ```
-All methods prefixed with `$` will be exposed as remote methods.
 
 ## Context in RPC Methods
 
@@ -477,38 +503,38 @@ wss.on('connection', (socket) => {
 userService.context; // throws error
 ```
 
-## Validation
+## Normalization
 
-Method `RPCSource.validate(validator, originFn)` allows you to wrap methods with a validator function.
+Method `RPCSource.normalize(normalizer, originFn)` allows you to wrap methods with a normalizer function.
 
 ### Parameters
-- `validator`: it takes an array of arguments and returns:
-  - `false`: validation fails
-  - `true`: validation passes, original arguments are used
-  - `any[]`: validation passes, new args will be used as arguments for the original function
+- `normalizer`: it takes an array of arguments and returns:
+  - `false`: normalization fails
+  - `true`: normalization passes, original arguments are used
+  - `any[]`: normalization passes, new args will be used as arguments for the original function
 - `originFn`: the original function to be wrapped.
 
 ### Returns
-A new function that will be called if validation passes.
+A new function that will be called if normalization passes.
 
 
 ### Examples:
 ```typescript
 
 // assert all arguments are numbers
-function allAreNumbers(params: unknown[]): params is number[] {
+function assertAllAreNumbers(params: unknown[]): params is number[] {
   return params.every(arg => typeof arg === "number"); // returns boolean
 }
 // convert all arguments to numbers
-function allToNumbers(params: unknown[]): number[] {
+function convertAllToNumbers(params: unknown[]): number[] {
   return params.map(arg => Number(arg)); // returns mapped values
 }
 
 const calculator = new RPCSource({
-  add: RPCSource.validate(allAreNumbers, function(...args) {
+  add: RPCSource.normalize(assertAllAreNumbers, function(...args) {
     return args.reduce((a, b) => a + b, 0);
   }),
-  multiply: RPCSource.validate(allToNumbers, function(...args) {
+  multiply: RPCSource.normalize(convertAllToNumbers, function(...args) {
     return args.reduce((a, b) => a * b, 1);
   })
 });
@@ -516,21 +542,21 @@ const calculator = new RPCSource({
 ////////// client //////////
 await channel.add(1, 2, 3); // returns 6
 await channel.multiply(5, "5"); // returns 25
-await channel.add(1, "2", 3); // throws validation error
+await channel.add(1, "2", 3); // throws normalization error
 ```
 
-You can use libraries like [Zod](https://zod.dev/) to validate method arguments:
+You can use libraries like [Zod](https://zod.dev/) to normalize method arguments:
 
 ```typescript
 import z as * from "zod";
 
-const validateSize = z.tuple([
-  z.number().int().min(0),
-  z.literal(["px", "em", "%"]).optional()
+const normalizeSize = z.tuple([
+  z.number().int().min(0), // first argument must be a non-negative integer
+  z.literal(["px", "em", "%"]).optional() // second argument must be one of the specified strings or undefined
 ]).parse;
 
 const sizeStore = new RPCSource({
-  setSize: RPCSource.validate(validateSize, function(size, units = "px") {
+  setSize: RPCSource.normalize(normalizeSize, function(size, units = "px") {
     // typeof size is inferred as number
     // typeof units is inferred as "px" | "em" | "%"
     return this.setState(`${size} ${units}`);
@@ -539,16 +565,16 @@ const sizeStore = new RPCSource({
 
 //////////  client side //////////
 await channel.setSize(100) // sets state to "100 px"
-await channel.setSize(-5, "em") // throws validation error by Zod
+await channel.setSize(-5, "em") // throws normalization error by Zod
 ```
-You can also validate a context object:
+You can also normalize a context object:
 ```typescript
-function validateContext(this: RPCSource, args: any[]) {
+function normalizeContext(this: RPCSource, args: any[]) {
   if (!this.context.url.includes("?admin")) throw new Error("wrong context");
   return true;
 }
 const rpc = new RPCSource({
-  echo: RPCSource.validate(validateContext, function(value) {
+  echo: RPCSource.normalize(normalizeContext, function(value) {
     return "Echo: " + value;
   }),
 });
@@ -585,11 +611,11 @@ new RPCSource(methods, initialState = undefined)
 | `withEventTypes<E>()` | Sets a new events type                                                                                                                          |
 
 #### Static Methods
-| Method                                   | Description                                                                                                                                       |
-|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `start(rpcSource, connection, options?)` | Starts the RPC service with the given source.<br/> Returns a function to close all channels.                                                      |
-| `with(methods_or_prefix, state?)`        | Binds parameters to RPCSource constructor.<br/> Returns a class that extends RPCSource. Used for [class-based RPCSource](#class-based-rpcsource). |
-| `validate(validator, originFn)`          | Wraps method with a validator function.<br/> Returns a new function that will be called if validation passes. See [validation](#validation)       |
+| Method                                   | Description                                                                                                                                           |
+|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start(rpcSource, connection, options?)` | Starts the RPC service with the given source.<br/> Returns a function to close all channels.                                                          |
+| `with(methods_or_prefix, state?)`        | Binds parameters to RPCSource constructor.<br/> Returns a class that extends RPCSource. Used for [class-based RPCSource](#class-based-rpcsource).     |
+| `normalize(normalizer, originFn)`        | Wraps method with a normalizer function.<br/> Returns a new function that will be called if normalization passes. See [normalization](#normalization) |
 
 #### Properties
 
@@ -723,12 +749,12 @@ const channelBlue2 = new RPCChannel<typeof blue>(createConnection(ws2, {prefix: 
 
 ////////// shared //////////
 function createConnection(ws, {prefix}) {
-  return (send, close) => {
+  return (onMessage, onClose) => {
     ws.on("message", (data) => {
       const [prefixReceived, ...rest] = JSON.parse(data.toString());
-      if (prefixReceived === prefix) send(...rest);
+      if (prefixReceived === prefix) onMessage(...rest);
     });
-    ws.on("close", () => close("Connection closed"));
+    ws.on("close", () => onClose("Connection closed"));
     return (...args) => ws.send(JSON.stringify([prefix, ...args]));
   };
 }
@@ -811,14 +837,14 @@ export const rpcSource = new RPCSource({
 });
 
 function createConnection(socket) {
-  return (send, close) => {
+  return (onMessage, onClose) => {
     // Handle incoming messages from the WebSocket
     socket.on("message", (data) => {
-      send(...JSON.parse(data.toString()));
+      onMessage(...JSON.parse(data.toString()));
     });
   
     // Handle WebSocket closure
-    socket.on("close", () => close("Client disconnected"));
+    socket.on("close", () => onClose("Client disconnected"));
 
     // Return a function to send messages back to the client
     return (...args) => {
@@ -839,11 +865,11 @@ import { RPCChannel } from "@flinbein/stateful-rpc";
 import type { rpcSource } from "./backend";
 
 function createConnection(socket: WebSocket) {
-  return (send, close) => {
+  return (onMessage, onClose) => {
     socket.onmessage = (event) => {
-      send(...JSON.parse(event.data));
+      onMessage(...JSON.parse(event.data));
     };
-    socket.onclose = () => close("Connection closed");
+    socket.onclose = () => onClose("Connection closed");
     return (...args) => {
       socket.send(JSON.stringify(args));
     };
@@ -880,11 +906,11 @@ const source = new RPCSource({
 });
 
 function createConnection(port: MessagePort) {
-  return (send: Function, close: Function) => {
+  return (onMessage: Function, onClose: Function) => {
     port.addEventListener("message", (event) => {
       const [type, ...args] = event.data;
-      if (type === "message") return send(...args);
-      if (type === "close") return close(args[0]);
+      if (type === "message") return onMessage(...args);
+      if (type === "close") return onClose(args[0]);
     });
     port.start();
     return (...args: any[]) => port.postMessage(["message", ...args]);
@@ -898,8 +924,6 @@ onconnect = (event: MessageEvent) => {
   port.postMessage(["ready"]);
 }
 
-console.log("=== SharedWorker done");
-
 export type { source };
 ```
 Client:
@@ -908,11 +932,11 @@ import RPCChannel from "@flinbein/stateful-rpc/channel";
 import type { source } from "./sharedWorker.js"
 
 function createConnection(port: MessagePort) {
-  return (send: Function, close: Function) => {
+  return (onMessage: Function, onClose: Function) => {
     port.addEventListener("message", (event) => {
       const [type, ...args] = event.data;
-      if (type === "message") return send(...args);
-      if (type === "close") return close(args[0]);
+      if (type === "message") return onMessage(...args);
+      if (type === "close") return onClose(args[0]);
     });
     // cleanup connection on unload
     window.addEventListener("beforeunload", () => {
@@ -952,12 +976,12 @@ sharedWorker.port.close();
 
 You can use the library with any transport that can send and receive messages as arrays. You need to implement a wrapper function that takes `send` and `close` functions and returns a `sendToRemote` function.
 ```typescript
-new RPCChannel((send, close) => {
+new RPCChannel((onMessage, onClose) => {
   return sendToRemote;
 });
 ```
-* You should call `send(...args)` when receiving a message intended for the RPCChannel.
-* You should call `close(reason?)` when the connection is broken. In this case, the current channel and all its child channels will be closed with the specified reason.
+* You should call `onMessage(...args)` when receiving a message intended for the RPCChannel.
+* You should call `onClose(reason?)` when the connection is broken. In this case, the current channel and all its child channels will be closed with the specified reason.
 * You should return a `sendToRemote(...args)` function that will send messages to the server.
 
 You can additionally specify a `getNextChannelId` function in the RPCChannel constructor options to generate channel IDs.
@@ -965,20 +989,20 @@ They should be unique for each channel within a single connection.
 This will reduce the size of messages as channel IDs will be smaller.
 ```typescript
 let i = 0;
-new RPCChannel((send, close) => {/*...*/}, {
+new RPCChannel((onMessage, onClose) => {/*...*/}, {
   getNextChannelId: () => i++
 });
 ```
 On the server side, the wrapper is created similarly:
 ```typescript
-RPCSource.start(rpcSource, (send, close) => {
+RPCSource.start(rpcSource, (onMessage, onClose) => {
   return sendToRemote;
 });
 ```
 You can specify the maximum number of channels that can be created by the client.
 You can also specify a context that will be available in RPCSource methods via `this.channel.context`.
 ```typescript
-const closeAllChannels = RPCSource.start(rpcSource, (send, close) => {...}, {
+const closeAllChannels = RPCSource.start(rpcSource, (onMessage, onClose) => {/*...*/}, {
   maxChannelsPerClient: 1000, // default is Infinity
   context: socket
 });
