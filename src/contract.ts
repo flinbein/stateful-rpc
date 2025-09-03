@@ -20,7 +20,7 @@ export type ClientMessageInitialize = [
 export type ChannelMessageCall = [
 	channelId: number|string,
 	action: CLIENT_ACTION.CALL, // 0
-	responseKey: any, // room will respond with this key
+	responseKey: any, // server will respond with this key
 	path: string[], // path to remote function
 	arguments: any[] // call function with these arguments
 ]
@@ -41,7 +41,7 @@ export type ClientMessageClose = [
 export type ClientMessageCreate = [
 	channelId: number|string,
 	action: CLIENT_ACTION.CREATE, // 2
-	newChannelId: number, // room will respond with this key
+	newChannelId: number, // server will respond with this key as channelId for the new channel
 	path: string[], // path to remote constructor
 	arguments: any[] // call constructor with these arguments
 ]

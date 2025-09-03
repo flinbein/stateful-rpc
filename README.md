@@ -9,7 +9,7 @@ A lightweight TypeScript library for type-safe Remote Procedure Calls (RPC) with
 - Nested channels support
 - Promise-based API
 - Based on Proxy for dynamic method handling
-- Works with [WebSockets](#using-with-websocket), [MessagePorts](#using-with-sharedworker), and [more](#using-with-other-transports)
+- Works with [WebSockets](#using-with-websocket), [MessagePorts](#using-with-sharedworker), [WebRTC](#using-with-webrtc-datachannel) and [more](#using-with-other-transports)
 
 ## Table of Contents
 
@@ -31,6 +31,7 @@ A lightweight TypeScript library for type-safe Remote Procedure Calls (RPC) with
   - [Interaction Diagram](#interaction-diagram)
 - [Using with WebSocket](#using-with-websocket)
 - [Using with SharedWorker](#using-with-sharedworker)
+- [Using with WebRTC DataChannel](#using-with-webrtc-datachannel)
 - [Using with Other Transports](#using-with-other-transports)
 - [License](#license)
 
@@ -662,6 +663,10 @@ new RPCChannel<
 >(connectionHandler, options?)
 ```
 
+If you need an RPCChannel on the server side, you can create it directly from an existing RPCSource:
+```typescript
+new RPCChannel(rpcSource, options?)
+```
 
 #### Properties
 
@@ -970,6 +975,45 @@ await channel.setState("new-shared-state");
 
 sharedWorker.port.postMessage(["close", "closed by user"]);
 sharedWorker.port.close();
+```
+
+## Using with WebRTC DataChannel
+
+Hosting side:
+```typescript
+const rpcSource = new RPCSource({/*,,,*/});
+const pc = new RTCPeerConnection(/*,,,*/);
+const dataChannel = pc.createDataChannel("rpc", {negotiated: true, id: 0});
+
+dataChannel.addEventListener("open", () => {
+	
+  RPCSource.start(rpcSource, (onMessage, onClose) => {
+    dataChannel.addEventListener("message", ({data}) => onMessage(...JSON.parse(data)));
+    dataChannel.addEventListener("close", onClose);
+	
+    return (...args) => dataChannel.send(JSON.stringify(args));
+  }, {context: dataChannel});
+  
+});
+// ... signaling code to establish the connection
+````
+Joining side:
+```typescript
+const pc = new RTCPeerConnection(/*,,,*/);
+const dataChannel = pc.createDataChannel("rpc", {negotiated: true, id: 0});
+
+dataChannel.addEventListener("open", () => {
+
+  const rpcChannel = new RPCChannel<typeof rpcSource>((onMessage, onClose) => {
+    dataChannel.addEventListener("message", ({data}) => onMessage(...JSON.parse(data)));
+    dataChannel.addEventListener("close", onClose);
+    
+    return (...args) => channel.send(JSON.stringify(args));
+  });
+
+  // use rpcChannel...
+});
+// ... signaling code to establish the connection
 ```
 
 ## Using with Other Transports

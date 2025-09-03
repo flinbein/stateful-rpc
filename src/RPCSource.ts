@@ -181,38 +181,6 @@ class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = und
 	
 	/**
 	 * Create new instance of RPC
-	 * @example
-	 * ```typescript
-	 * // remote code
-	 * const rpcSource = new RPCSource((connection: Connection, path: string[], args: any[], openChannel: boolean) => {
-	 *   if (path.length === 0 && path[0] === "sum") return args[0] + args[1];
-	 *   throw new Error("method not found");
-	 * });
-	 * RPCSource.start(rpcSource, room);
-	 * ```
-	 * ```typescript
-	 * // client code
-	 * const rpc = new RPCChannel(client);
-	 * const result = await rpc.test(5, 3);
-	 * console.assert(result === 8);
-	 * ```
-	 * @example
-	 * ```typescript
-	 * // remote code
-	 * const rpcSource = new RPCSource({
-	 *   sum(x, y){
-	 *     console.log("connection:", room.useConnection());
-	 *     return x + y;
-	 *   }
-	 * });
-	 * RPCSource.start(rpcSource, room);
-	 * ```
-	 * ```typescript
-	 * // client code
-	 * const rpc = new RPCChannel(client);
-	 * const result = await rpc.test(5, 3);
-	 * console.assert(result === 8);
-	 * ```
 	 * @param {RPCHandler|METHODS} handler
 	 * handler can be:
 	 * - `function` of type {@link RPCHandler};
@@ -443,6 +411,7 @@ class RPCSource<METHODS extends (Record<string, any> | string) = {}, STATE = und
 			onCreateChannel?: (channel: RPCSource.Channel, parentChannel: RPCSource.Channel | undefined) => void
 		} = {}
 	){
+		if (rpcSource.disposed) throw new Error("disposed", {cause: rpcSource.#disposeReason});
 		const channels = new Map<string|number, RPCSource.Channel>
 		const subscribers = new Map<RPCSource<any, any, any>, (string|number)[]>
 		let sendMessageQueue: RemoteMessage[]|null = [];

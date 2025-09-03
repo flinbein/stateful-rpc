@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Example</title>
+    <script type="module" defer>
+	    import { RPCSource, RPCChannel } from 'https://cdn.jsdelivr.net/npm/@flinbein/stateful-rpc/+esm';
+
+	    const iceServers = [
+	        { urls: "stun:stun.l.google.com:19302" },
+	        { urls: "stun:stun1.l.google.com:19302" },
+	        { urls: "stun:stun2.l.google.com:19302" },
+	        {
+		        "urls": ["turn:stun.evan-brass.net", "turn:stun.evan-brass.net?transport=tcp", "stun:stun.evan-brass.net"],
+		        "username": "guest",
+		        "credential": "password"
+	        }
+        ]
+
+        const createServerBtn = document.getElementById("createServerBtn");
+		const remoteIdInput = document.getElementById("remoteIdInput");
+		const connectBtn = document.getElementById("connectBtn");
+
+		createServerBtn.addEventListener("click", createServer);
+		connectBtn.addEventListener("click", () => {
+			const serverId = remoteIdInput.value.trim();
+            if (serverId) connectToServer(serverId);
+        });
+
+        function createServer(){
+	        createServerBtn.disabled = true;
+
+			const rpc = new RPCSource({
+                sendText(text){
+					this.setState([...this.state, {from: this.context, text}]);
+                }
+            }, []);
+
+			const peerConnections = new Map(); // <id, RTCPeerConnection>
+            window.__peerConnections = peerConnections;
+			const ws = new WebSocket("wss://signaling.flinbein.ru");
+			ws.addEventListener("message", (event) => {
+				/** @type {{from: string} & (RTCSessionDescriptionInit | RTCIceCandidate) | {from: null, id: string}} */
+				const {from = null, ...data} = JSON.parse(event.data);
+				if (data.id) {
+					showReadyState(data.id, createRpcChannel);
+					return;
+				}
+				if (data.sdp) onSdp(from, data);
+				if (data.candidate) onCandidate(from, data);
+            });
+
+            async function onSdp(id, sdp) {
+	            const pc = new RTCPeerConnection({iceServers});
+	            pc.createDataChannel("", {negotiated: true, id: 0});
+	            pc.addEventListener("icecandidate", ({candidate}) => {
+					if (candidate) sendTo(id, candidate.toJSON());
+	            });
+				pc.addEventListener("datachannel", ({channel}) => onChannel(id, channel));
+	            peerConnections.set(id, pc);
+	            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+	            const answer = await pc.createAnswer();
+	            await pc.setLocalDescription(answer);
+	            sendTo(id, answer);
+            }
+
+			async function onCandidate(from, candidate) {
+                const pc = peerConnections.get(from);
+				await pc?.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+
+			/**
+             * @param {string} id
+             * @param {RTCDataChannel} channel
+			 */
+			async function onChannel(id, channel) {
+				if (!channel.label) return;
+				channel.addEventListener("open", () => {
+					RPCSource.start(rpc, (onMessage, onClose) => {
+						channel.addEventListener("message", ({data}) => onMessage(...JSON.parse(data)));
+						channel.addEventListener("close", onClose);
+						return (...args) => channel.send(JSON.stringify(args));
+                    }, {context: String(channel.label)});
+                });
+            }
+
+			function sendTo(to, data) {
+				console.log("======== sendto-S", to, data, { to, ...data });
+				ws.send(JSON.stringify({ to, ...data }));
+			}
+
+	        function createRpcChannel(name){
+				let sendToRpcSource;
+				let sendToRpcChannel;
+		        RPCSource.start(rpc, (onMessage) => {
+			        sendToRpcSource = onMessage;
+					return (...args) => sendToRpcChannel(...args);
+		        }, {context: name});
+
+		        return new RPCChannel((onMessage) => {
+			        sendToRpcChannel = onMessage;
+                    return (...args) => sendToRpcSource(...args);
+		        });
+	        }
+        }
+
+	    async function connectToServer(serverId){
+
+		    const ws = new WebSocket("wss://signaling.flinbein.ru");
+			ws.addEventListener("message", (event) => {
+				const {from = null, ...data} = JSON.parse(event.data);
+				if (from !== serverId) return;
+				if (data.sdp) onSdp(data);
+				if (data.candidate) onCandidate(data);
+            });
+			await new Promise((res) => ws.addEventListener("open", res, {once: true}));
+			const pc = new RTCPeerConnection({iceServers});
+		    pc.createDataChannel("", {negotiated: true, id: 0});
+		    pc.addEventListener("icecandidate", ({candidate}) => {
+				if (candidate) sendToServer(candidate.toJSON())
+		    });
+			window.__pc = pc;
+            const offer = await pc.createOffer();
+		    await pc.setLocalDescription(offer);
+		    sendToServer(offer);
+
+
+
+            function onSdp(sdp) {
+	            pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            }
+
+		    function onCandidate(candidate) {
+			    pc.addIceCandidate(new RTCIceCandidate(candidate));
+		    }
+
+		    function sendToServer(data) {
+			    ws.send(JSON.stringify({ to: serverId, ...data }));
+		    }
+
+			async function createRpcChannel(name){
+				const channel = pc.createDataChannel(name);
+				await new Promise((res, rej) => {
+					channel.addEventListener("open", res, {once: true});
+					channel.addEventListener("close", rej, {once: true});
+				});
+
+				return new RPCChannel((onMessage, onClose) => {
+					channel.addEventListener("message", ({data}) => onMessage(...JSON.parse(data)));
+					channel.addEventListener("close", onClose);
+					return (...args) => channel.send(JSON.stringify(args));
+                });
+            }
+
+			pc.addEventListener("connectionstatechange", () => {
+                if (pc.connectionState === "connected") {
+	                showReadyState(serverId, createRpcChannel);
+                }
+            })
+		    //showReadyState(serverId, createRpcChannel);
+        }
+
+		function showReadyState(serverId, createRpcChannel){
+			const tpl = document.getElementById("tplReadyState");
+			while (document.body.firstChild) document.body.removeChild(document.body.firstChild);
+
+			const clone = tpl.content.cloneNode(true);
+			document.body.appendChild(clone);
+			document.querySelector("._serverId").value = serverId;
+			const nameInput = document.querySelector("._name");
+			const joinBtn = document.querySelector("._btnJoin");
+			joinBtn.addEventListener("click", async () => {
+				const name = nameInput.value;
+				if (!name) return;
+				nameInput.value = "";
+				const rpcChannel = await createRpcChannel(name);
+				createChatUI(name, document.querySelector("._joinedClients"), rpcChannel);
+			});
+        }
+
+		function createChatUI(clientName, appendTo, rpcChannel){
+			console.log("createChatUI", clientName, rpcChannel);
+			if (rpcChannel.closed) return;
+			const tpl = document.getElementById("tplJoinedClient");
+			const clone = tpl.content.cloneNode(true);
+			appendTo.appendChild(clone);
+			const container = appendTo.lastElementChild;
+			container.querySelector("._clientName").textContent = clientName;
+			const messageInput = container.querySelector("._sendMessage");
+			const messagesLog = container.querySelector("._messagesLog");
+			const sendBtn = container.querySelector("._btnSend");
+			sendBtn.addEventListener("click", sendMessage);
+			sendBtn.disabled = messageInput.disabled = !rpcChannel.ready;
+			messageInput.addEventListener("keydown", ({key}) => {
+                if (key === "Enter") sendMessage();
+            });
+			function sendMessage() {
+                rpcChannel.sendText(messageInput.value);
+                messageInput.value = "";
+				messageInput.focus();
+            }
+			rpcChannel.on("ready", () => sendBtn.disabled = messageInput.disabled = false);
+			rpcChannel.on("state", updateState);
+			function updateState(state) {
+                messagesLog.value = state.map(({from, text}) => `${from}: ${text}`).join("\n");
+                messagesLog.scrollTop = messagesLog.scrollHeight;
+            }
+			if (rpcChannel.state) updateState(rpcChannel.state);
+			rpcChannel.on("close", () => container.remove());
+        }
+
+    </script>
+
+    <template id="tplJoinedClient">
+        <div class="_joinedClient" style="border: 1px solid black; margin: 5px; padding: 5px; max-width: 300px;">
+            <div>
+                name: <kbd class="_clientName">...</kbd>
+            </div>
+            <div>
+                <input class="_sendMessage" type="text" placeholder="message">
+                <button class="_btnSend">Send</button>
+            </div>
+            <textarea class="_messagesLog" readonly rows="10"></textarea>
+        </div>
+    </template>
+
+    <template id="tplReadyState">
+        <div>
+            Server ID: <input class="_serverId" type="text" readonly size="50" />
+        </div>
+        <div class="_joinedClients" style="display: flex"></div>
+        <div>
+            <label>Join as:<input class="_name" type="text" placeholder="name"></label>
+            <button class="_btnJoin">Join</button>
+        </div>
+
+    </template>
+</head>
+
+<body>
+    <div>
+        <button id="createServerBtn">Create server</button>
+    </div>
+
+    <div>
+        <label>Connect as a client: <input id="remoteIdInput" type="text" size="50"></label>
+        <button id="connectBtn">Connect</button>
+    </div>
+</body>
+</html>

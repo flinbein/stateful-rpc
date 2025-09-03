@@ -1,6 +1,7 @@
 import EventEmitter from "./EventEmitter.js";
 import {CLIENT_ACTION, REMOTE_ACTION, ClientMessage, RemoteMessage} from "./contract.js";
 import type { MetaScope, EventPathArgs, EventPath } from "./type-utils.js";
+import type RPCSource from "./RPCSource.js";
 
 export type RPCChannelConnection = (onMessage: (...messages: RemoteMessage) => void, onClose: (reason?: any) => void) => (...messages: ClientMessage) => void;
 
@@ -184,29 +185,43 @@ export type RPCChannelEvents<S> = {
 }
 
 /**
- * Constructor for new RPC channel based on {@link VarhubConnection}
+ * Constructor for new RPC channel based on {@link RPCSource}
  * @group Classes
  */
-const RPCChannel = (function<M extends MetaScope | MetaDesc = {}>(connection: RPCChannelConnection, options?: {
+const RPCChannel = (function(connection: RPCChannelConnection | RPCSource, options?: {
 	getNextChannelId?: () => string|number,
 	connectionTimeout?: number | AbortSignal
 }) {
-	const manager = new ChannelManager(connection, options?.getNextChannelId, options?.connectionTimeout);
-	return manager.defaultChannel.proxy as RPCChannel<M>;
+	let connectionFn: RPCChannelConnection;
+	if (typeof connection === "function") {
+		connectionFn = connection;
+	} else {
+		connectionFn = (onChannelMessage) => {
+			let onSourceMessage: any;
+			(connection.constructor as typeof RPCSource).start(connection, (onMessage: any) => {
+				onSourceMessage = onMessage;
+				return (...args) => onChannelMessage(...args);
+			});
+			return onSourceMessage;
+		}
+	}
+	const manager = new ChannelManager(connectionFn, options?.getNextChannelId, options?.connectionTimeout);
+	return manager.defaultChannel.proxy;
+	
 } as any as (
 	{
 		/**
-		 * Create new channel for RPC
-		 * @typeParam M - typeof current {@link RPCSource} of room (with methods, constructors and events)
+		 * Create a new channel for RPC
+		 * @typeParam M - typeof current {@link RPCSource} from server
 		 * @param {RPCChannelConnection} connection - message handler
 		 * @param [options]
 		 * @param options.getNextChannelId generator for next channel id, default is random string of 16 characters.
 		 * @param options.connectionTimeout - timeout in milliseconds or {@link AbortSignal} to wait for channel ready state. Default is no timeout.
 		 * @returns {RPCChannelInstance<undefined>} - stateless channel.
 		 * - result extends {@link RPCChannelInstance}.
-		 * - result has all methods of current {@link RPCSource} in room.
+		 * - result has all methods of current {@link RPCSource}
 		 * - all methods are asynchronous and return a {@link Promise}<{@link any}>
-		 * - result has constructors for all constructable methods of {@link RPCSource} in room.
+		 * - result has constructors for all constructable methods of {@link RPCSource}.
 		 * - all constructors are synchronous and return a new {@link RPCChannel}
 		 */
 		new<M extends MetaScope | MetaDesc = {}>(
@@ -216,6 +231,28 @@ const RPCChannel = (function<M extends MetaScope | MetaDesc = {}>(connection: RP
 				connectionTimeout?: number | AbortSignal
 			}
 		): RPCChannel<M>,
+		
+		/**
+		 * Create a new channel for RPC
+		 * @typeParam M - typeof current {@link RPCSource}
+		 * @param {RPCSource<any, any>} source
+		 * @param [options]
+		 * @param options.getNextChannelId generator for next channel id, default is random string of 16 characters.
+		 * @param options.connectionTimeout - timeout in milliseconds or {@link AbortSignal} to wait for channel ready state. Default is no timeout.
+		 * @returns {RPCChannelInstance<undefined>} - stateless channel.
+		 * - result extends {@link RPCChannelInstance}.
+		 * - result has all methods of current {@link RPCSource}.
+		 * - all methods are asynchronous and return a {@link Promise}<{@link any}>
+		 * - result has constructors for all constructable methods of {@link RPCSource}.
+		 * - all constructors are synchronous and return a new {@link RPCChannel}
+		 */
+		new<R extends RPCSource<any, any, any>>(
+			source: R,
+			options?: {
+				getNextChannelId?: () => string|number,
+				connectionTimeout?: number | AbortSignal
+			}
+		): RPCChannel<R>,
 	}
 	));
 

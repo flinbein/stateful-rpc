@@ -133,7 +133,7 @@ flowchart LR
 ```
 After this procedure, RPCSource will always reject new connections.
 
-## Client to Room Messages
+## Client to Server Messages
 
 ### Initialize RPC
 ```typescript
@@ -150,7 +150,7 @@ Handler will respond with:
 type ChannelMessageCall = [
   channelId: number|string,
   action: CLIENT_ACTION.CALL, // 0
-  responseKey: any, // room will respond with this key
+  responseKey: any, // server will respond with this key
   path: string[], // path to remote function
   arguments: any[] // call function with these arguments  
 ]
@@ -185,7 +185,7 @@ No response is expected from the handler.
 type ClientMessageCreate = [
   channelId: number|string,
   action: CLIENT_ACTION.CREATE, // 2 
-  newChannelId: number, // room will respond with this key
+  newChannelId: number, // server will respond with this key
   path: string[], // path to remote constructor
   arguments: any[] // call constructor with these arguments   
 ]
@@ -196,7 +196,7 @@ Handler will respond with:
 
 ---
 
-## Room to Client Messages
+## Server to Client Messages
 
 ### Method Call Result
 ```typescript
